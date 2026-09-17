@@ -61,7 +61,6 @@ func _ready() -> void:
 	control_panel.custom_minimum_size = Vector2(0, 240) # Slightly expanded vertical container boundary box
 	control_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL # Forces vertical centering
 	control_panel.apply_orientation_layout_shift(false, top_status_holder)
-
 func setup_dual_pass_pipeline() -> void:
 	display_row_container = HBoxContainer.new()
 	display_row_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -93,9 +92,7 @@ func setup_dual_pass_pipeline() -> void:
 	label_safety_alert.add_theme_font_size_override("font_size", 14)
 	canvas_stack.add_child(label_safety_alert)
 	
-	# =========================================================================
-	# PASS 1: GENERATIVE PATTERN BACKGROUND BUFFER
-	# =========================================================================
+	# --- PASS 1: GENERATIVE MATH BUFFER ---
 	pass1_viewport = SubViewport.new()
 	pass1_viewport.size = current_preset.target_resolution
 	pass1_viewport.disable_3d = true
@@ -106,14 +103,13 @@ func setup_dual_pass_pipeline() -> void:
 	
 	pass1_rect = ColorRect.new()
 	pass1_rect.size = current_preset.target_resolution
+	pass1_rect.custom_minimum_size = current_preset.target_resolution
 	pass1_viewport.add_child(pass1_rect)
 	
 	pass1_material = ShaderMaterial.new()
 	pass1_rect.material = pass1_material
 	
-	# =========================================================================
-	# PASS 2: GEOMETRIC WARPING INTERMEDIATE BUFFER
-	# =========================================================================
+	# --- PASS 2: GEOMETRIC WARPING BUFFER ---
 	pass2_viewport = SubViewport.new()
 	pass2_viewport.size = current_preset.target_resolution
 	pass2_viewport.disable_3d = true
@@ -124,24 +120,20 @@ func setup_dual_pass_pipeline() -> void:
 	
 	pass2_rect = ColorRect.new()
 	pass2_rect.size = current_preset.target_resolution
+	pass2_rect.custom_minimum_size = current_preset.target_resolution
 	pass2_viewport.add_child(pass2_rect)
 	
 	pass2_material = ShaderMaterial.new()
 	pass2_rect.material = pass2_material
 	
-	# Link Pass 2 to read Pass 1's procedural output
-	pass2_material.set_shader_parameter("u_pattern_texture", pass1_viewport.get_texture())
-	
-	# =========================================================================
-	# PASS 3: FINAL POST-PROCESS FILTER BUFFER (VISIBLE TO PLAYER)
-	# =========================================================================
+	# --- PASS 3: POST-PROCESS FILTER BUFFER (VISIBLE SCREEN) ---
 	pass3_viewport = SubViewport.new()
 	pass3_viewport.size = current_preset.target_resolution
 	pass3_viewport.disable_3d = true
 	pass3_viewport.transparent_bg = false
 	pass3_viewport.render_target_clear_mode = SubViewport.CLEAR_MODE_ALWAYS
 	pass3_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	canvas_container.add_child(pass3_viewport) # Nested inside container to draw to screen
+	canvas_container.add_child(pass3_viewport)
 	
 	pass3_rect = ColorRect.new()
 	pass3_rect.size = current_preset.target_resolution
@@ -151,8 +143,10 @@ func setup_dual_pass_pipeline() -> void:
 	pass3_material = ShaderMaterial.new()
 	pass3_rect.material = pass3_material
 	
-	# Link Pass 3 to read Pass 2's warped geometric output
+	# Establish the explicit texture pipeline bindings
+	pass2_material.set_shader_parameter("u_pattern_texture", pass1_viewport.get_texture())
 	pass3_material.set_shader_parameter("u_warped_texture", pass2_viewport.get_texture())
+
 
 func setup_interface_layer() -> void:
 	var ui_layer = CanvasLayer.new()
@@ -427,7 +421,6 @@ func save_current_pattern_preset() -> void:
 	DisplayServer.clipboard_set(output)
 	control_panel.label_status.text = " ✅ COPIED %d PARAMETERS FROM %s TO CLIPBOARD! " % [active_params.size(), layer_label]
 
-
 func load_default_test_shaders() -> void:
 	# =========================================================================
 	# PASS 1: INIGO QUILEZ DOMAIN WARPING (GENERATIVE MATH)
@@ -478,39 +471,29 @@ func load_default_test_shaders() -> void:
 	"""
 	
 	# =========================================================================
-	# PASS 2: GEOMETRIC KALEIDOSCOPE WARP
+	# PASS 2: GEOMETRIC KALEIDOSCOPE WARP (CLAUDE FIX INTEGRATED)
 	# =========================================================================
 	var p2_src = """
 	shader_type canvas_item;
-	uniform sampler2D u_pattern_texture : hint_screen_texture, filter_linear_mipmap;
+	// CLAUDE FIX: Plain user-defined sampler without screen hint conflicts
+	uniform sampler2D u_pattern_texture : filter_linear;
 	uniform float u_time;
 	
 	// CAT: Geometric Setup
 	// DESC: Number of reflective segments across the radial circle matrix.
 	uniform float u_segments = 6.0;
-	
-	// DESC: Rotational offset velocity tracking factor.
 	uniform float u_rotation_speed = 0.2;
 	
 	void fragment() {
-		// Translate coordinates to center anchor point (-0.5 to 0.5)
 		vec2 uv = UV - 0.5;
-		
-		// Convert Cartesian space coordinates directly into Polar coordinate arcs
 		float r = length(uv);
 		float a = atan(uv.y, uv.x) + (u_time * u_rotation_speed);
-		
-		// Calculate segment angle boundaries
 		float angle_step = 2.0 * 3.14159265 / max(u_segments, 1.0);
 		
-		// Fold space symmetrically across segments
 		a = mod(a, angle_step);
 		a = abs(a - angle_step * 0.5);
 		
-		// Convert back to Cartesian space coordinates mapped to standard UV bounds
 		vec2 warped_uv = vec2(cos(a), sin(a)) * r + 0.5;
-		
-		// Enforce safety boundary clipping clamps
 		warped_uv = clamp(warped_uv, 0.001, 0.999);
 		
 		COLOR = texture(u_pattern_texture, warped_uv);
@@ -518,51 +501,38 @@ func load_default_test_shaders() -> void:
 	"""
 	
 	# =========================================================================
-	# PASS 3: ANALOG EDGE GLOW FILTER
+	# PASS 3: ANALOG EDGE GLOW FILTER (CLAUDE FIX INTEGRATED)
 	# =========================================================================
 	var p3_src = """
 	shader_type canvas_item;
-	uniform sampler2D u_warped_texture : hint_screen_texture, filter_linear_mipmap;
+	// CLAUDE FIX: Plain user-defined sampler without screen hint conflicts
+	uniform sampler2D u_warped_texture : filter_linear;
 	uniform float u_time;
 	
 	// CAT: Glow Intensity
 	// DESC: Structural mathematical edge amplification threshold limits.
 	uniform float u_edge_threshold = 0.15;
-	
-	// DESC: Absolute luminous blending emission amplification intensity scale factor.
 	uniform float u_glow_intensity = 2.5;
-	
-	// DESC: Pixel sampling search step boundary distance offset size.
 	uniform vec2 u_step_offset = vec2(0.003, 0.003);
 	
 	void fragment() {
 		vec2 uv = UV;
-		
-		// Core color sample extraction
 		vec4 center_color = texture(u_warped_texture, uv);
 		
-		// Take surrounding neighbor point luminance sample metrics (Sobel kernel layout)
 		float c  = (center_color.r + center_color.g + center_color.b) / 3.0;
 		float left  = (texture(u_warped_texture, uv - vec2(u_step_offset.x, 0.0)).g);
 		float right = (texture(u_warped_texture, uv + vec2(u_step_offset.x, 0.0)).g);
 		float up    = (texture(u_warped_texture, uv - vec2(0.0, u_step_offset.y)).g);
 		float down  = (texture(u_warped_texture, uv + vec2(0.0, u_step_offset.y)).g);
 		
-		// Structural mathematical spatial difference calculations
 		float edge_delta = abs(c - left) + abs(c - right) + abs(c - up) + abs(c - down);
-		
-		// Execute mathematical stepping rules against active boundary thresholds
 		float edge_mask = smoothstep(u_edge_threshold, u_edge_threshold + 0.1, edge_delta);
-		
-		// Amplify color matrices across detected structural boundaries
 		vec3 glowing_borders = center_color.rgb * edge_mask * u_glow_intensity;
 		
-		// Composite final rendering pass blend data array mix layers together cleanly
 		COLOR = vec4(center_color.rgb + glowing_borders, center_color.a);
 	}
 	"""
 	
-	# Compile and assign resources cleanly
 	var s1 = Shader.new(); s1.code = p1_src
 	var s2 = Shader.new(); s2.code = p2_src
 	var s3 = Shader.new(); s3.code = p3_src
@@ -571,9 +541,8 @@ func load_default_test_shaders() -> void:
 	pass2_material.shader = s2
 	pass3_material.shader = s3
 	
-	# Reinitialize the texture pipeline links firmly
+	# Apply the user-assigned textures directly to the parameters
 	pass2_material.set_shader_parameter("u_pattern_texture", pass1_viewport.get_texture())
 	pass3_material.set_shader_parameter("u_warped_texture", pass2_viewport.get_texture())
 	
-	# Default control UI focus states back onto Pass 1 pattern math variables
 	control_panel.load_shader_source(p1_src)
