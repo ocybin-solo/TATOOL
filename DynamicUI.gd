@@ -145,7 +145,7 @@ func load_shader_source(shader_code: String) -> void:
 	parsed_uniforms.clear()
 	uniform_values.clear()
 	uniform_descriptions.clear()
-	shader_categories.clear() # Reset category map
+	shader_categories.clear()
 	
 	var lines = shader_code.split("\n")
 	var active_cached_desc: String = ""
@@ -167,14 +167,15 @@ func load_shader_source(shader_code: String) -> void:
 		# 3. Match uniform variables
 		if trimmed.contains("uniform"):
 			var regex = RegEx.new()
-			regex.compile("uniform\\s+(float|vec2|vec4)\\s+(\\w+)")
+			regex.compile("uniform\\s+(float|vec2|vec4|sampler2D)\\s+(\\w+)")
 			var result = regex.search(trimmed)
 			
 			if result:
 				var u_type = result.get_string(1)
 				var u_name = result.get_string(2)
 				
-				if u_name == "u_time" or u_name == "u_pattern_texture": continue
+				if u_name == "u_time" or u_name == "u_pattern_texture" or u_type == "sampler2D": 
+					continue
 				
 				parsed_uniforms.append({"name": u_name, "type": u_type})
 				
@@ -182,7 +183,36 @@ func load_shader_source(shader_code: String) -> void:
 				if active_cached_cat != "":
 					if not shader_categories.has(active_cached_cat):
 						shader_categories[active_cached_cat] = u_name
-					active_cached_cat = "" # Clear temporary tag
+					active_cached_cat = "" 
+				else:
+					# 🌀 FALLBACK AUTO-CATEGORIZER REGEX ENGINES
+					var target_cat = "🌀 UTILITY / OTHER"
+					var lower_name = u_name.to_lower()
+					
+					var kw_distortion = ["warp", "twist", "wave", "bend", "scroll", "distort", "zoom", "pinch", "offset"]
+					var kw_chromatic = ["color", "hue", "rgb", "fade", "palette", "tint", "bright", "sat", "contrast", "alpha"]
+					var kw_frequency = ["speed", "freq", "time", "scale", "step", "rate", "pulse", "bpm", "length"]
+					
+					for kw in kw_distortion:
+						if lower_name.contains(kw):
+							target_cat = "🎨 DISTORTION"
+							break
+					
+					if target_cat == "🌀 UTILITY / OTHER":
+						for kw in kw_chromatic:
+							if lower_name.contains(kw):
+								target_cat = "🌈 CHROMATIC"
+								break
+								
+					if target_cat == "🌀 UTILITY / OTHER":
+						for kw in kw_frequency:
+							if lower_name.contains(kw):
+								target_cat = "⚡ FREQUENCY"
+								break
+								
+					# Register fallback category hook safely
+					if not shader_categories.has(target_cat):
+						shader_categories[target_cat] = u_name
 				
 				# Link descriptions
 				if active_cached_desc != "":

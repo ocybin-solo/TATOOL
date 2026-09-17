@@ -64,25 +64,23 @@ func setup_dual_pass_pipeline() -> void:
 	display_row_container.mouse_filter = Control.MOUSE_FILTER_PASS
 	add_child(display_row_container)
 	
-	# Central Layout Anchor Space
 	upper_display_area = CenterContainer.new()
 	upper_display_area.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	upper_display_area.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	upper_display_area.mouse_filter = Control.MOUSE_FILTER_PASS
 	display_row_container.add_child(upper_display_area)
 	
-	# Compact Stack holding ONLY the canvas viewport and the performance metrics
 	var canvas_stack = VBoxContainer.new()
 	canvas_stack.alignment = BoxContainer.ALIGNMENT_CENTER
 	canvas_stack.mouse_filter = Control.MOUSE_FILTER_PASS
 	upper_display_area.add_child(canvas_stack)
 	
+	# This container will display Pass 2 (the final output) to the user
 	canvas_container = SubViewportContainer.new()
 	canvas_container.stretch = true
 	canvas_container.custom_minimum_size = current_preset.target_resolution
 	canvas_stack.add_child(canvas_container)
 	
-	# --- RENDER DIAGNOSTIC readouts (TIGHTLY ALLIGNED BENEATH CANVAS) ---
 	label_safety_alert = Label.new()
 	label_safety_alert.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label_safety_alert.text = ""
@@ -90,37 +88,41 @@ func setup_dual_pass_pipeline() -> void:
 	label_safety_alert.add_theme_font_size_override("font_size", 14)
 	canvas_stack.add_child(label_safety_alert)
 	
-	
-	# =========================================================================
-	# VIEWPORT NODES BINDING PIPELINE
-	# =========================================================================
+	# --- PASS 1 VIEWPORT (Procedural Generation Buffer) ---
 	pass1_viewport = SubViewport.new()
 	pass1_viewport.size = current_preset.target_resolution
 	pass1_viewport.disable_3d = true
+	pass1_viewport.transparent_bg = false
+	# CRITICAL: Prevent uninitialized white buffers
+	pass1_viewport.render_target_clear_mode = SubViewport.CLEAR_MODE_ALWAYS 
 	pass1_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	add_child(pass1_viewport)
+	add_child(pass1_viewport) # Keeps it processing in the background
 	
 	pass1_rect = ColorRect.new()
-	pass1_rect.custom_minimum_size = current_preset.target_resolution
 	pass1_rect.size = current_preset.target_resolution
 	pass1_viewport.add_child(pass1_rect)
 	
 	pass1_material = ShaderMaterial.new()
 	pass1_rect.material = pass1_material
 	
+	# --- PASS 2 VIEWPORT (Visible Final Screen Buffer) ---
 	pass2_viewport = SubViewport.new()
 	pass2_viewport.size = current_preset.target_resolution
 	pass2_viewport.disable_3d = true
+	pass2_viewport.transparent_bg = false
+	pass2_viewport.render_target_clear_mode = SubViewport.CLEAR_MODE_ALWAYS
 	pass2_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	canvas_container.add_child(pass2_viewport)
+	# CRITICAL: Pass 2 must be the child of the container to be visible on screen!
+	canvas_container.add_child(pass2_viewport) 
 	
 	pass2_rect = ColorRect.new()
-	pass2_rect.custom_minimum_size = current_preset.target_resolution
 	pass2_rect.size = current_preset.target_resolution
 	pass2_viewport.add_child(pass2_rect)
 	
 	pass2_material = ShaderMaterial.new()
 	pass2_rect.material = pass2_material
+	
+	# Explicitly connect the texture bridge
 	pass2_material.set_shader_parameter("u_pattern_texture", pass1_viewport.get_texture())
 
 func setup_interface_layer() -> void:
@@ -442,5 +444,7 @@ func load_default_test_shaders() -> void:
 	var s2 = Shader.new(); s2.code = p2_src
 	pass1_material.shader = s1
 	pass2_material.shader = s2
+	
+	# FORCE RENDERING ASSIGNMENT SYNC HERE
 	pass2_material.set_shader_parameter("u_pattern_texture", pass1_viewport.get_texture())
 	control_panel.load_shader_source(p1_src)

@@ -1,5 +1,5 @@
 shader_type canvas_item;
-
+uniform sampler2D u_pattern_texture;
 // =============================================================================
 // FREE SHADER LAB — MasterShader.gdshader
 // =============================================================================
@@ -720,7 +720,7 @@ if (pinwheel_strength > 0.001) {
 	// TEXTURE SAMPLING
 	// =========================================================================
 
-	vec4 tex;
+	vec4 tex = texture(u_pattern_texture, UV); 
 	if (rgb_split > 0.001) {
 		float spd    = sync_speed(rgb_split_speed);
 		float offset = rgb_split * sin(manual_time * PI * 2.0 * spd);
@@ -1114,12 +1114,13 @@ if (newton_strength > 0.001) {
 	float edge_glow_ring = smoothstep(mask_radius - 0.02, mask_radius, dist_center) * mask;
 	tex.rgb             += base_color.rgb * edge_glow_ring * 0.5;
 
-	if (abs(mask_radius - dist_center) < 0.05) {
-		float fringe   = smoothstep(0.05, 0.0, abs(mask_radius - dist_center));
-		float r_fringe = texture(TEXTURE, wrapped_uv + (mask_uv * 0.01 * fringe)).r;
-		float b_fringe = texture(TEXTURE, wrapped_uv - (mask_uv * 0.01 * fringe)).b;
-		tex.rgb = mix(tex.rgb, vec3(r_fringe, tex.g, b_fringe), fringe * 0.5);
-	}
+if (abs(mask_radius - dist_center) < 0.05) {
+	float fringe   = smoothstep(0.05, 0.0, abs(mask_radius - dist_center));
+	// FIX: Changed TEXTURE to u_pattern_texture
+	float r_fringe = texture(u_pattern_texture, wrapped_uv + (mask_uv * 0.01 * fringe)).r;
+	float b_fringe = texture(u_pattern_texture, wrapped_uv - (mask_uv * 0.01 * fringe)).b;
+	tex.rgb = mix(tex.rgb, vec3(r_fringe, tex.g, b_fringe), fringe * 0.5);
+}
 
 	COLOR = vec4(tex.rgb, tex.a * base_color.a);
 }
