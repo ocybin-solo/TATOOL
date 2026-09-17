@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" uid="uid://dgtuk05v0xbo3" path="res://MainManager.gd" id="1_ig7tw"]
 
-[node name="Main" type="VBoxContainer" unique_id=478646852]
+[node name="main" type="VBoxContainer" unique_id=478646852]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0

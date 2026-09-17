@@ -2,6 +2,10 @@ extends VBoxContainer
 
 signal uniform_changed(name: String, value: Variant)
 
+# Stores Category Names linked to the first uniform variable inside them
+# Format: {"colors": "u_pattern_color", "scales": "u_warp_frequency"}
+var shader_categories: Dictionary = {}
+
 var parsed_uniforms: Array = []
 var active_index: int = 0
 var sensitivity: float = 1.0
@@ -9,6 +13,7 @@ var sensitivity_presets: Array = [0.01, 0.1, 1.0, 5.0, 10.0]
 var current_sens_index: int = 2
 var active_sub_channel: int = 0
 var uniform_values: Dictionary = {}
+var is_input_blocked: bool = false
 
 # Dictionary cache linking variable names directly to their parsed comments
 var uniform_descriptions: Dictionary = {}
@@ -139,19 +144,26 @@ func load_shader_source(shader_code: String) -> void:
 	parsed_uniforms.clear()
 	uniform_values.clear()
 	uniform_descriptions.clear()
+	shader_categories.clear() # Reset category map
 	
 	var lines = shader_code.split("\n")
 	var active_cached_desc: String = ""
+	var active_cached_cat: String = ""
 	
 	for line in lines:
 		var trimmed = line.strip_edges()
 		
-		# 1. Capture description tags
+		# 1. Capture category tags
+		if trimmed.begins_with("// CAT:"):
+			active_cached_cat = trimmed.replace("// CAT:", "").strip_edges()
+			continue
+		
+		# 2. Capture description tags
 		if trimmed.begins_with("// DESC:"):
 			active_cached_desc = trimmed.replace("// DESC:", "").strip_edges()
 			continue
 			
-		# 2. Match variables via code structure syntax
+		# 3. Match uniform variables
 		if trimmed.contains("uniform"):
 			var regex = RegEx.new()
 			regex.compile("uniform\\s+(float|vec2|vec4)\\s+(\\w+)")
@@ -165,14 +177,20 @@ func load_shader_source(shader_code: String) -> void:
 				
 				parsed_uniforms.append({"name": u_name, "type": u_type})
 				
-				# Link description to variable if tag was cached on previous lines
+				# Link first discovered variable to the active category block
+				if active_cached_cat != "":
+					if not shader_categories.has(active_cached_cat):
+						shader_categories[active_cached_cat] = u_name
+					active_cached_cat = "" # Clear temporary tag
+				
+				# Link descriptions
 				if active_cached_desc != "":
 					uniform_descriptions[u_name] = active_cached_desc
-					active_cached_desc = "" # Clear temporary cache buffer
+					active_cached_desc = ""
 				else:
 					uniform_descriptions[u_name] = "Analog variable adjustment channel link."
 				
-				# Populate logical defaults
+				# Populate defaults
 				if u_name == "u_warp_frequency": uniform_values[u_name] = Vector2(2.5, 2.5)
 				elif u_type == "float": uniform_values[u_name] = 1.0
 				elif u_type == "vec2": uniform_values[u_name] = Vector2(5.0, 5.0)
@@ -181,17 +199,33 @@ func load_shader_source(shader_code: String) -> void:
 	active_index = 0
 	active_sub_channel = 0
 	update_status_readout()
-
+	
 func _on_dpad_up() -> void:
+	# 🌟 SECURE GROUP-BASED NAVIGATION
+	var main_manager = get_tree().get_first_node_in_group("main_manager")
+
+	if main_manager and main_manager.get("is_menu_open"):
+		main_manager.active_menu_index = posmod(main_manager.active_menu_index - 1, main_manager.active_menu_categories.size())
+		main_manager.redraw_fast_travel_menu()
+		return
+
 	if parsed_uniforms.is_empty(): return
 	active_index = posmod(active_index - 1, parsed_uniforms.size())
 	active_sub_channel = 0
 	update_status_readout()
 
 func _on_dpad_down() -> void:
+	# 🌟 SECURE GROUP-BASED NAVIGATION
+	var main_manager = get_tree().get_first_node_in_group("main_manager")
+
+	if main_manager and main_manager.get("is_menu_open"):
+		main_manager.active_menu_index = posmod(main_manager.active_menu_index + 1, main_manager.active_menu_categories.size())
+		main_manager.redraw_fast_travel_menu()
+		return
+
 	if parsed_uniforms.is_empty(): return
 	active_index = posmod(active_index + 1, parsed_uniforms.size())
-	active_sub_channel = 0
+	active_sub_channel = 0 
 	update_status_readout()
 
 func _on_dpad_left() -> void:
@@ -221,8 +255,13 @@ func _on_channel_back() -> void:
 	update_status_readout()
 
 func modify_active_value(direction_multiplier: float) -> void:
+	# 🌟 SAFETY VALVE GUARD LINE
+	if is_input_blocked: return
+
+	# The rest of your existing modify_active_value function remains the same:
 	if parsed_uniforms.is_empty(): return
 	var active_uniform = parsed_uniforms[active_index]
+
 	var u_name = active_uniform["name"]
 	var u_type = active_uniform["type"]
 	var applied_change = direction_multiplier * sensitivity
@@ -263,14 +302,14 @@ func update_status_readout() -> void:
 	var val_str = str(uniform_values[p_name])
 	var sens_str = str(sensitivity)
 	
-	# Pull description string out of the cache map
 	var desc_str = uniform_descriptions.get(p_name, "Adjustable hardware matrix parameter.")
 	
-	# --- UPGRADED DOUBLE-LINE FORMATTING BLOCK ---
-	# Line 1: Real-time numeric variable states
-	# Line 2 (\n): Static human-readable operational description text
+	# --- UPGRADED CONTEXT-SAFE SEPARATED LABEL LAYOUT BLOCK ---
+	# We format the text locally. This decouples the status label from 
+	# layout container updates at boot, preventing recursive stack loops.
 	label_status.text = "  PARAM: %s (%s)%s   •   VALUE: %s   •   SENSITIVITY: %s  \nℹ️  %s  " % [
 		p_name, u_type, sub_ch, val_str, sens_str, desc_str
 	]
 	
-	if label_sens_indicator:label_sens_indicator.text = sens_str
+	if label_sens_indicator:
+		label_sens_indicator.text = sens_str

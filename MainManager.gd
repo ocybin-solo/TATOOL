@@ -39,11 +39,13 @@ var is_menu_open: bool = false
 
 
 func _ready() -> void:
+	# 🌟 REGISTER GLOBAL NODE GROUP (Removes fixed-depth path dependencies)
+	add_to_group("main_manager")
+	
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_PASS
 	
 	current_preset = load("res://PatternPreset.gd").new()
-	
 	setup_dual_pass_pipeline()
 	setup_interface_layer()
 	load_default_test_shaders()
@@ -158,6 +160,7 @@ func setup_dual_pass_pipeline() -> void:
 	display_row_container.add_child(start_spacer)
 
 func setup_interface_layer() -> void:
+	# Ensure it binds directly to the global class variable
 	var ui_layer = CanvasLayer.new()
 	add_child(ui_layer)
 	
@@ -173,12 +176,9 @@ func setup_interface_layer() -> void:
 	top_status_holder.add_theme_stylebox_override("panel", style)
 	main_layout.add_child(top_status_holder)
 
-	# Internal layout to push performance data to the far right side
 	var top_hbox = HBoxContainer.new()
 	top_hbox.mouse_filter = Control.MOUSE_FILTER_PASS
 	top_status_holder.add_child(top_hbox)
-
-
 	
 	var upper_spacer = Control.new()
 	upper_spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -189,28 +189,58 @@ func setup_interface_layer() -> void:
 	main_layout.add_child(control_panel)
 	control_panel.uniform_changed.connect(_on_ui_uniform_modified)
 	
+	# =========================================================================
+	# 🕹️ UNIFIED THREE-BUTTON HARDWARE CLUSTER ROW
+	# =========================================================================
 	var bottom_toolbar = HBoxContainer.new()
-	bottom_toolbar.custom_minimum_size = Vector2(0, 45)
+	bottom_toolbar.custom_minimum_size = Vector2(0, 50)
+	bottom_toolbar.alignment = BoxContainer.ALIGNMENT_CENTER
 	main_layout.add_child(bottom_toolbar)
 	
+	# 1. SELECT (Left Side of Group)
+	var btn_select_layer = Button.new()
+	btn_select_layer.text = "🔄 SELECT"
+	btn_select_layer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn_select_layer.pressed.connect(_on_select_button_pressed)
+	bottom_toolbar.add_child(btn_select_layer)
+	
+	# 2. EXPORT PACK (Center Anchor)
 	var btn_save = Button.new()
 	btn_save.text = "💾 EXPORT PACK (.TRES)"
 	btn_save.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	btn_save.pressed.connect(save_current_pattern_preset)
 	bottom_toolbar.add_child(btn_save)
+	
+	# 3. START MENU (Right Side of Group)
+	var btn_start_menu = Button.new()
+	btn_start_menu.text = "🕹️ START"
+	btn_start_menu.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn_start_menu.pressed.connect(_on_start_button_pressed)
+	bottom_toolbar.add_child(btn_start_menu)
 
 func _on_select_button_pressed() -> void:
+	print("🚨 SELECT BUTTON METRIC RECEIVED BY MAIN MANAGER! 🚨")
+	# 1. Flip our internal focus layer variable (0 -> 1 -> 0)
 	active_shader_layer = posmod(active_shader_layer + 1, 2)
+	
+	# 🌟 THE FIX: Force the UI selection pointer to reset back to zero before rebuilding the arrays
+	control_panel.active_index = 0
+	control_panel.active_sub_channel = 0
+	
 	if active_shader_layer == 0:
+		print("Console Focus: Pass 1 (Pattern Generator)")
 		control_panel.load_shader_source(pass1_material.shader.code)
 		for u_name in control_panel.uniform_values:
 			var val = pass1_material.get_shader_parameter(u_name)
 			if val != null: control_panel.uniform_values[u_name] = val
 	else:
+		print("Console Focus: Pass 2 (Animation Effects)")
 		control_panel.load_shader_source(pass2_material.shader.code)
 		for u_name in control_panel.uniform_values:
 			var val = pass2_material.get_shader_parameter(u_name)
 			if val != null: control_panel.uniform_values[u_name] = val
+			
+	# 2. Force the text ribbon across the top of the screen to redraw itself completely
 	control_panel.update_status_readout()
 
 func _on_start_button_pressed() -> void:
@@ -221,21 +251,19 @@ func _on_start_button_pressed() -> void:
 		close_fast_travel_menu()
 
 func open_fast_travel_menu() -> void:
-	# 1. Ask the UI panel to give us the categories parsed from the active shader file
 	active_menu_categories = control_panel.shader_categories.keys()
 	if active_menu_categories.is_empty():
 		is_menu_open = false
 		return
-		
 	active_menu_index = 0
 	
-	# 2. Programmatically construct the layout panel overlay window
 	menu_overlay_panel = PanelContainer.new()
-	menu_overlay_panel.custom_minimum_size = Vector2(300, 200)
+	menu_overlay_panel.custom_minimum_size = Vector2(340, 240)
 	var style = StyleBoxFlat.new()
-	style.bg_color = Color(0.02, 0.02, 0.04, 0.95)
+	style.bg_color = Color(0.02, 0.02, 0.04, 0.92)
 	style.set_border_width_all(2)
-	style.border_color = Color(0.1, 0.7, 0.9, 0.8)
+	style.border_color = Color(0.0, 0.85, 1.0, 0.9)
+	style.set_corner_radius_all(8)
 	menu_overlay_panel.add_theme_stylebox_override("panel", style)
 	upper_display_area.add_child(menu_overlay_panel)
 	
@@ -243,8 +271,8 @@ func open_fast_travel_menu() -> void:
 	menu_list_box.alignment = BoxContainer.ALIGNMENT_CENTER
 	menu_overlay_panel.add_child(menu_list_box)
 	
-	# Block regular thumb pad logic from firing while configuring menu options
-	control_panel.set_process_input(false)
+	# 🌟 FIX THE LOOPS: Set our custom safety flag instead of modifying core input loops
+	control_panel.is_input_blocked = true
 	redraw_fast_travel_menu()
 
 func redraw_fast_travel_menu() -> void:
@@ -268,21 +296,19 @@ func redraw_fast_travel_menu() -> void:
 			lbl.text = "    %s    " % active_menu_categories[i].to_upper()
 			lbl.add_theme_color_override("font_color", Color.DARK_GRAY)
 		menu_list_box.add_child(lbl)
+		
 func close_fast_travel_menu() -> void:
 	if not menu_overlay_panel: return
-	
-	# Fast-Travel Snap! Find the target parameter index linked to this chosen category block
 	var selected_cat = active_menu_categories[active_menu_index]
 	var target_param_name = control_panel.shader_categories[selected_cat]
 	
-	# Scan parsed uniform arrays inside the UI wrapper container to lock down indices matching names
 	for idx in range(control_panel.parsed_uniforms.size()):
 		if control_panel.parsed_uniforms[idx]["name"] == target_param_name:
 			control_panel.active_index = idx
 			break
 			
-	# Restore standard mobile d-pad navigation controls
-	control_panel.set_process_input(true)
+	# 🌟 FIX THE LOOPS: Restore input channel access safely
+	control_panel.is_input_blocked = false
 	control_panel.update_status_readout()
 	
 	menu_overlay_panel.queue_free()
@@ -371,23 +397,27 @@ func save_current_pattern_preset() -> void:
 
 
 func load_default_test_shaders() -> void:
-	# PASS 1: The Inigo Quilez Domain Warping Pattern (With Description Tags)
+	# PASS 1: The Inigo Quilez Domain Warping Pattern
 	var p1_src = """
 	shader_type canvas_item;
 	uniform float u_time;
 	
+	// CAT: Spatial Configuration
 	// DESC: Modulates spatial compression grid boundaries.
 	uniform vec2 u_warp_frequency = vec2(2.5, 2.5);
 	
+	// CAT: Warping Calculations
 	// DESC: Controls absolute topological distortion strength.
 	uniform float u_warp_strength = 1.1;
 	
 	// DESC: Adjusts fractal Brownian depth loops (1.0 to 5.0).
 	uniform float u_noise_detail = 4.0;
 	
+	// CAT: Fluid Motion
 	// DESC: Changes global texture drift tracking velocity.
 	uniform float u_flow_speed = 0.4;
 	
+	// CAT: Aesthetics & Tinting
 	// DESC: Sets primary tint vector values.
 	uniform vec4 u_pattern_color : source_color = vec4(0.1, 0.7, 0.9, 1.0);
 	
@@ -418,12 +448,13 @@ func load_default_test_shaders() -> void:
 	}
 	"""
 	
-	# PASS 2: Animation Effect Filter (With Description Tags)
+	# PASS 2: Animation Effect Filter
 	var p2_src = """
 	shader_type canvas_item;
 	uniform float u_time;
 	uniform sampler2D u_pattern_texture;
 	
+	// CAT: Wave Distortions
 	// DESC: Sets frequency oscillation density across coordinates.
 	uniform float u_wave_frequency = 10.0;
 	
@@ -441,12 +472,8 @@ func load_default_test_shaders() -> void:
 	}
 	"""
 	
-	var s1 = Shader.new()
-	s1.code = p1_src
-	
-	var s2 = Shader.new()
-	s2.code = p2_src
-	
+	var s1 = Shader.new(); s1.code = p1_src
+	var s2 = Shader.new(); s2.code = p2_src
 	pass1_material.shader = s1
 	pass2_material.shader = s2
 	pass2_material.set_shader_parameter("u_pattern_texture", pass1_viewport.get_texture())
