@@ -28,7 +28,6 @@ func _ready() -> void:
 	setup_ui_layout()
 
 func setup_ui_layout() -> void:
-	# Upper status text readout structure
 	label_status = Label.new()
 	label_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label_status.text = "No Shader Loaded"
@@ -41,12 +40,15 @@ func setup_ui_layout() -> void:
 	
 	var btn_size = Vector2(66, 66)
 	
-	# =========================================================================
-	# D-PAD 1 (FAR LEFT): NAVIGATES PARAMETERS AND SUB-CHANNELS
-	# =========================================================================
+	# Left wing layout padding (Pushes left D-pad inward for natural thumb placement)
+	var left_spacer = Control.new()
+	left_spacer.custom_minimum_size = Vector2(50, 0)
+	input_row_container.add_child(left_spacer)
+	
+	# --- D-PAD 1 (LEFT THUMB - NAVIGATION) ---
 	var nav_grid = GridContainer.new()
 	nav_grid.columns = 3
-	nav_grid.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	nav_grid.size_flags_vertical = Control.SIZE_SHRINK_CENTER # Perfect vertical centering
 	input_row_container.add_child(nav_grid)
 	
 	nav_grid.add_child(Control.new())
@@ -83,16 +85,15 @@ func setup_ui_layout() -> void:
 	nav_grid.add_child(btn_p_down)
 	nav_grid.add_child(Control.new())
 	
-	var central_expanding_spacer = Control.new()
-	central_expanding_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	input_row_container.add_child(central_expanding_spacer)
+	# Expanding Central Vault Spacer
+	var middle_expanding_spacer = Control.new()
+	middle_expanding_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	input_row_container.add_child(middle_expanding_spacer)
 	
-	# =========================================================================
-	# D-PAD 2 (FAR RIGHT): CONTROLS VALUES AND SENSITIVITY DEGREES
-	# =========================================================================
+	# --- D-PAD 2 (RIGHT THUMB - VALUE MODIFIER) ---
 	var val_grid = GridContainer.new()
 	val_grid.columns = 3
-	val_grid.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	val_grid.size_flags_vertical = Control.SIZE_SHRINK_CENTER # Perfect vertical centering
 	input_row_container.add_child(val_grid)
 	
 	val_grid.add_child(Control.new())
@@ -109,7 +110,6 @@ func setup_ui_layout() -> void:
 	btn_sens_down.pressed.connect(_on_dpad_left)
 	val_grid.add_child(btn_sens_down)
 	
-	# Initialize your dynamic thumb feedback text layout
 	label_sens_indicator = Label.new()
 	label_sens_indicator.text = "1.0"
 	label_sens_indicator.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -129,9 +129,10 @@ func setup_ui_layout() -> void:
 	val_grid.add_child(btn_val_down)
 	val_grid.add_child(Control.new())
 	
-	var right_pad = Control.new()
-	right_pad.custom_minimum_size = Vector2(20, 0)
-	input_row_container.add_child(right_pad)
+	# Right wing layout padding (Balances the spacing symmetrically)
+	var right_spacer = Control.new()
+	right_spacer.custom_minimum_size = Vector2(50, 0)
+	input_row_container.add_child(right_spacer)
 
 func apply_orientation_layout_shift(_to_portrait: bool, target_top_container: PanelContainer) -> void:
 	if label_status.get_parent():
@@ -301,14 +302,17 @@ func update_status_readout() -> void:
 	var sub_ch = get_sub_channel_name(u_type)
 	var val_str = str(uniform_values[p_name])
 	var sens_str = str(sensitivity)
-	
 	var desc_str = uniform_descriptions.get(p_name, "Adjustable hardware matrix parameter.")
 	
-	# --- UPGRADED CONTEXT-SAFE SEPARATED LABEL LAYOUT BLOCK ---
-	# We format the text locally. This decouples the status label from 
-	# layout container updates at boot, preventing recursive stack loops.
-	label_status.text = "  PARAM: %s (%s)%s   •   VALUE: %s   •   SENSITIVITY: %s  \nℹ️  %s  " % [
-		p_name, u_type, sub_ch, val_str, sens_str, desc_str
+	# Query the registered global group to dynamically find our current active pass layer index
+	var layer_header: String = "[PASS 1: PATTERN]"
+	var main_manager = get_tree().get_first_node_in_group("main_manager")
+	if main_manager and main_manager.get("active_shader_layer") == 1:
+		layer_header = "[PASS 2: EFFECTS]"
+	
+	# --- UPGRADED REAL-TIME HUD STATUS STRING CONCATENATION ---
+	label_status.text = "  %s  •  PARAM: %s (%s)%s  •  VALUE: %s  •  SENSITIVITY: %s  \nℹ️  %s  " % [
+		layer_header, p_name, u_type, sub_ch, val_str, sens_str, desc_str
 	]
 	
 	if label_sens_indicator:

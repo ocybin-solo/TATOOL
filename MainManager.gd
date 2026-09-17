@@ -50,8 +50,11 @@ func _ready() -> void:
 	setup_interface_layer()
 	load_default_test_shaders()
 	
-	control_panel.custom_minimum_size = Vector2(0, 220)
+	# Update the final size constraints at the bottom of MainManager.gd -> _ready()
+	control_panel.custom_minimum_size = Vector2(0, 240) # Slightly expanded vertical container boundary box
+	control_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL # Forces vertical centering
 	control_panel.apply_orientation_layout_shift(false, top_status_holder)
+
 
 func setup_dual_pass_pipeline() -> void:
 	display_row_container = HBoxContainer.new()
@@ -61,26 +64,14 @@ func setup_dual_pass_pipeline() -> void:
 	display_row_container.mouse_filter = Control.MOUSE_FILTER_PASS
 	add_child(display_row_container)
 	
-	# --- SELECT BUTTON ---
-	var select_spacer = Control.new()
-	select_spacer.custom_minimum_size = Vector2(15, 0)
-	display_row_container.add_child(select_spacer)
-	
-	var btn_select = Button.new()
-	btn_select.text = "SELECT\n(LAYER)"
-	btn_select.custom_minimum_size = Vector2(80, 80)
-	btn_select.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	btn_select.pressed.connect(_on_select_button_pressed)
-	display_row_container.add_child(btn_select)
-	
-	# Central Layout Anchor
+	# Central Layout Anchor Space
 	upper_display_area = CenterContainer.new()
 	upper_display_area.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	upper_display_area.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	upper_display_area.mouse_filter = Control.MOUSE_FILTER_PASS
 	display_row_container.add_child(upper_display_area)
 	
-	# Visual layout wrapper node to hold both canvas and the alert message
+	# Compact Stack holding ONLY the canvas viewport and the performance metrics
 	var canvas_stack = VBoxContainer.new()
 	canvas_stack.alignment = BoxContainer.ALIGNMENT_CENTER
 	canvas_stack.mouse_filter = Control.MOUSE_FILTER_PASS
@@ -91,32 +82,17 @@ func setup_dual_pass_pipeline() -> void:
 	canvas_container.custom_minimum_size = current_preset.target_resolution
 	canvas_stack.add_child(canvas_container)
 	
-		# --- RENDER DIAGNOSTIC DISPLAY readouts (NOW REPOSITIONED BENEATH VIEWPORT) ---
+	# --- RENDER DIAGNOSTIC readouts (TIGHTLY ALLIGNED BENEATH CANVAS) ---
 	label_safety_alert = Label.new()
 	label_safety_alert.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label_safety_alert.text = ""
 	label_safety_alert.add_theme_color_override("font_color", Color.RED)
-	# Reduce visual label text scale settings so font stays thin
 	label_safety_alert.add_theme_font_size_override("font_size", 14)
 	canvas_stack.add_child(label_safety_alert)
 	
-	label_perf_monitor = Label.new()
-	label_perf_monitor.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label_perf_monitor.text = "FPS: -- | VRAM: -- MB"
-	label_perf_monitor.add_theme_font_size_override("font_size", 13) # Thinner, minimal font
-	# Add a light gray accent color override so it sits quietly beneath canvas
-	label_perf_monitor.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7, 0.8))
-	canvas_stack.add_child(label_perf_monitor)
-	
-	# --- SAFETY WARNING READOUT NODE ---
-	label_safety_alert = Label.new()
-	label_safety_alert.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label_safety_alert.text = ""
-	label_safety_alert.add_theme_color_override("font_color", Color.RED)
-	canvas_stack.add_child(label_safety_alert)
 	
 	# =========================================================================
-	# VIEWPORT LAYERS SETUP
+	# VIEWPORT NODES BINDING PIPELINE
 	# =========================================================================
 	pass1_viewport = SubViewport.new()
 	pass1_viewport.size = current_preset.target_resolution
@@ -146,18 +122,6 @@ func setup_dual_pass_pipeline() -> void:
 	pass2_material = ShaderMaterial.new()
 	pass2_rect.material = pass2_material
 	pass2_material.set_shader_parameter("u_pattern_texture", pass1_viewport.get_texture())
-	
-	# --- START BUTTON ---
-	var btn_start = Button.new()
-	btn_start.text = "START\n(MENU)"
-	btn_start.custom_minimum_size = Vector2(80, 80)
-	btn_start.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	btn_start.pressed.connect(_on_start_button_pressed)
-	display_row_container.add_child(btn_start)
-	
-	var start_spacer = Control.new()
-	start_spacer.custom_minimum_size = Vector2(15, 0)
-	display_row_container.add_child(start_spacer)
 
 func setup_interface_layer() -> void:
 	# Ensure it binds directly to the global class variable
@@ -169,6 +133,7 @@ func setup_interface_layer() -> void:
 	main_layout.mouse_filter = Control.MOUSE_FILTER_PASS
 	ui_layer.add_child(main_layout)
 	
+	# Replace your top_status_holder block in MainManager.gd with this:
 	top_status_holder = PanelContainer.new()
 	top_status_holder.mouse_filter = Control.MOUSE_FILTER_PASS
 	var style = StyleBoxFlat.new()
@@ -179,6 +144,18 @@ func setup_interface_layer() -> void:
 	var top_hbox = HBoxContainer.new()
 	top_hbox.mouse_filter = Control.MOUSE_FILTER_PASS
 	top_status_holder.add_child(top_hbox)
+	
+	# Pushes a dedicated spacer block to keep performance data tucked flat right
+	var top_banner_expanding_spacer = Control.new()
+	top_banner_expanding_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top_hbox.add_child(top_banner_expanding_spacer)
+
+	label_perf_monitor = Label.new()
+	label_perf_monitor.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	label_perf_monitor.text = "FPS: -- | VRAM: -- MB"
+	label_perf_monitor.add_theme_font_size_override("font_size", 13)
+	label_perf_monitor.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7, 0.8))
+	top_hbox.add_child(label_perf_monitor)
 	
 	var upper_spacer = Control.new()
 	upper_spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -219,7 +196,7 @@ func setup_interface_layer() -> void:
 	bottom_toolbar.add_child(btn_start_menu)
 
 func _on_select_button_pressed() -> void:
-	print("🚨 SELECT BUTTON METRIC RECEIVED BY MAIN MANAGER! 🚨")
+
 	# 1. Flip our internal focus layer variable (0 -> 1 -> 0)
 	active_shader_layer = posmod(active_shader_layer + 1, 2)
 	
@@ -334,15 +311,16 @@ func _check_hardware_gpu_safety() -> void:
 	# 1. Pull system resource usage metrics from the engine servers
 	var current_vram_mb = Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED) / 1024.0 / 1024.0
 	var current_fps = Engine.get_frames_per_second()
-	var current_draws = Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)
+
 	
 	# 2. Permanent Diagnostic Display Readout Sync (Top-Right)
+	# Update this specific section inside your _check_hardware_gpu_safety() function:
 	if label_perf_monitor:
-		label_perf_monitor.text = " FPS: %d  |  VRAM: %.1f MB  |  DRAWS: %d   " % [current_fps, current_vram_mb, current_draws]
-		# Color code performance text to match your original design logic
+		label_perf_monitor.text = " FPS: %d  |  VRAM: %.1f MB   " % [current_fps, current_vram_mb]
 		if current_fps > 55: label_perf_monitor.add_theme_color_override("font_color", Color.GREEN)
 		elif current_fps > 30: label_perf_monitor.add_theme_color_override("font_color", Color.YELLOW)
 		else: label_perf_monitor.add_theme_color_override("font_color", Color.RED)
+
 	
 	# 3. Mobile Breaker Trip Point
 	var vram_safety_trip_point = 1000.0 # 1GB Limit
@@ -449,28 +427,16 @@ func load_default_test_shaders() -> void:
 	"""
 	
 	# PASS 2: Animation Effect Filter
-	var p2_src = """
-	shader_type canvas_item;
-	uniform float u_time;
-	uniform sampler2D u_pattern_texture;
+	var effect_shader_file_path = "res://EffectsShader.gdshader" 
+	var p2_src = ""
 	
-	// CAT: Wave Distortions
-	// DESC: Sets frequency oscillation density across coordinates.
-	uniform float u_wave_frequency = 10.0;
-	
-	// DESC: Changes physical spatial width deviation bounds.
-	uniform float u_wave_amplitude = 0.02;
-	
-	// DESC: Accelerates linear displacement timing offsets.
-	uniform float u_wave_speed = 3.0;
-	
-	void fragment() {
-		vec2 uv = UV;
-		float wave = sin(uv.y * u_wave_frequency + u_time * u_wave_speed) * u_wave_amplitude;
-		uv.x += wave;
-		COLOR = texture(u_pattern_texture, uv);
-	}
-	"""
+	if FileAccess.file_exists(effect_shader_file_path):
+		p2_src = FileAccess.get_file_as_string(effect_shader_file_path)
+		print("✅ SUCCESS: Ingested %d characters from your effect library file." % p2_src.length())
+	else:
+		# Fallback placeholder string just in case the file path drops out
+		p2_src = "shader_type canvas_item; uniform sampler2D u_pattern_texture; void fragment() { COLOR = texture(u_pattern_texture, UV); }"
+		print("⚠️ WARNING: Could not find your shader file. Loading transparent fallback pass.")
 	
 	var s1 = Shader.new(); s1.code = p1_src
 	var s2 = Shader.new(); s2.code = p2_src
