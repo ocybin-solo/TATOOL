@@ -222,6 +222,17 @@ func setup_interface_layer() -> void:
 	active_shader_layer = 0
 
 func _on_select_button_pressed() -> void:
+	# 🔒 CRITICAL UI LOCK: Prevent layer switching while the fast-travel menu is open
+	if is_menu_open: 
+		print("⚠️ UI Input Blocked: Cannot switch layers while Fast-Travel menu is active.")
+		return
+
+	# 1. Cycle focus cleanly between 3 discrete layers (0 -> 1 -> 2 -> 0)
+	active_shader_layer = posmod(active_shader_layer + 1, 3)
+	
+	# Reset the UI pointer safely before loading new parameter variables
+	control_panel.active_index = 0
+	control_panel.active_sub_channel = 0
 	# 1. Cycle focus cleanly between 3 discrete layers (0 -> 1 -> 2 -> 0)
 	active_shader_layer = posmod(active_shader_layer + 1, 3)
 	
@@ -269,9 +280,20 @@ func _on_start_button_pressed() -> void:
 		close_fast_travel_menu()
 
 func open_fast_travel_menu() -> void:
+	# Force the UI to refresh its category dictionary based on the currently active layer code
+	var active_mat: ShaderMaterial = null
+	match active_shader_layer:
+		0: active_mat = pass1_material
+		1: active_mat = pass2_material
+		2: active_mat = pass3_material
+		
+	if active_mat and active_mat.shader:
+		control_panel.load_shader_source(active_mat.shader.code)
+
 	active_menu_categories = control_panel.shader_categories.keys()
 	if active_menu_categories.is_empty():
 		is_menu_open = false
+		control_panel.is_input_blocked = false
 		return
 	active_menu_index = 0
 	
@@ -317,18 +339,28 @@ func redraw_fast_travel_menu() -> void:
 		
 func close_fast_travel_menu() -> void:
 	if not menu_overlay_panel: return
-	var selected_cat = active_menu_categories[active_menu_index]
-	var target_param_name = control_panel.shader_categories[selected_cat]
 	
-	for idx in range(control_panel.parsed_uniforms.size()):
-		if control_panel.parsed_uniforms[idx]["name"] == target_param_name:
-			control_panel.active_index = idx
-			break
+	# Safety check: Ensure we actually have categories populated
+	if not active_menu_categories.is_empty() and active_menu_index < active_menu_categories.size():
+		var selected_cat = active_menu_categories[active_menu_index]
+		
+		# SAFE LOOKUP: Use .get() to prevent hard-crashes if a key is missing
+		var target_param_name = control_panel.shader_categories.get(selected_cat, "")
+		
+		if target_param_name != "":
+			# Walk the parsed uniforms array to find the index matching our parameter name
+			for idx in range(control_panel.parsed_uniforms.size()):
+				if control_panel.parsed_uniforms[idx]["name"] == target_param_name:
+					control_panel.active_index = idx
+					break
+		else:
+			print("⚠️ Fast-Travel: Category key '%s' not found in active UI cache." % selected_cat)
 			
-	# 🌟 FIX THE LOOPS: Restore input channel access safely
+	# 🌟 RESTORE INPUT CHANNEL ACCESS SAFELY
 	control_panel.is_input_blocked = false
 	control_panel.update_status_readout()
 	
+	# Clean up the UI overlay panel node from memory safely
 	menu_overlay_panel.queue_free()
 	menu_overlay_panel = null
 
