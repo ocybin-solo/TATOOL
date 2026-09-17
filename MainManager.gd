@@ -18,15 +18,22 @@ var active_menu_categories: Array = []
 var active_menu_index: int = 0
 
 
-# --- DUAL PASS VIEWPORT ARCHITECTURE ---
+# --- TRIPLE PASS VIEWPORT ARCHITECTURE ---
 var pass1_viewport: SubViewport
 var pass1_rect: ColorRect
 var pass1_material: ShaderMaterial
 
-var canvas_container: SubViewportContainer
 var pass2_viewport: SubViewport
 var pass2_rect: ColorRect
 var pass2_material: ShaderMaterial
+
+var canvas_container: SubViewportContainer
+var pass3_viewport: SubViewport
+var pass3_rect: ColorRect
+var pass3_material: ShaderMaterial
+
+
+
 
 # Core State Trackers
 var current_preset: PatternPreset
@@ -55,7 +62,6 @@ func _ready() -> void:
 	control_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL # Forces vertical centering
 	control_panel.apply_orientation_layout_shift(false, top_status_holder)
 
-
 func setup_dual_pass_pipeline() -> void:
 	display_row_container = HBoxContainer.new()
 	display_row_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -75,7 +81,6 @@ func setup_dual_pass_pipeline() -> void:
 	canvas_stack.mouse_filter = Control.MOUSE_FILTER_PASS
 	upper_display_area.add_child(canvas_stack)
 	
-	# This container will display Pass 2 (the final output) to the user
 	canvas_container = SubViewportContainer.new()
 	canvas_container.stretch = true
 	canvas_container.custom_minimum_size = current_preset.target_resolution
@@ -88,15 +93,16 @@ func setup_dual_pass_pipeline() -> void:
 	label_safety_alert.add_theme_font_size_override("font_size", 14)
 	canvas_stack.add_child(label_safety_alert)
 	
-	# --- PASS 1 VIEWPORT (Procedural Generation Buffer) ---
+	# =========================================================================
+	# PASS 1: GENERATIVE PATTERN BACKGROUND BUFFER
+	# =========================================================================
 	pass1_viewport = SubViewport.new()
 	pass1_viewport.size = current_preset.target_resolution
 	pass1_viewport.disable_3d = true
 	pass1_viewport.transparent_bg = false
-	# CRITICAL: Prevent uninitialized white buffers
-	pass1_viewport.render_target_clear_mode = SubViewport.CLEAR_MODE_ALWAYS 
+	pass1_viewport.render_target_clear_mode = SubViewport.CLEAR_MODE_ALWAYS
 	pass1_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	add_child(pass1_viewport) # Keeps it processing in the background
+	add_child(pass1_viewport)
 	
 	pass1_rect = ColorRect.new()
 	pass1_rect.size = current_preset.target_resolution
@@ -105,15 +111,16 @@ func setup_dual_pass_pipeline() -> void:
 	pass1_material = ShaderMaterial.new()
 	pass1_rect.material = pass1_material
 	
-	# --- PASS 2 VIEWPORT (Visible Final Screen Buffer) ---
+	# =========================================================================
+	# PASS 2: GEOMETRIC WARPING INTERMEDIATE BUFFER
+	# =========================================================================
 	pass2_viewport = SubViewport.new()
 	pass2_viewport.size = current_preset.target_resolution
 	pass2_viewport.disable_3d = true
 	pass2_viewport.transparent_bg = false
 	pass2_viewport.render_target_clear_mode = SubViewport.CLEAR_MODE_ALWAYS
 	pass2_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	# CRITICAL: Pass 2 must be the child of the container to be visible on screen!
-	canvas_container.add_child(pass2_viewport) 
+	add_child(pass2_viewport) 
 	
 	pass2_rect = ColorRect.new()
 	pass2_rect.size = current_preset.target_resolution
@@ -122,11 +129,32 @@ func setup_dual_pass_pipeline() -> void:
 	pass2_material = ShaderMaterial.new()
 	pass2_rect.material = pass2_material
 	
-	# Explicitly connect the texture bridge
+	# Link Pass 2 to read Pass 1's procedural output
 	pass2_material.set_shader_parameter("u_pattern_texture", pass1_viewport.get_texture())
+	
+	# =========================================================================
+	# PASS 3: FINAL POST-PROCESS FILTER BUFFER (VISIBLE TO PLAYER)
+	# =========================================================================
+	pass3_viewport = SubViewport.new()
+	pass3_viewport.size = current_preset.target_resolution
+	pass3_viewport.disable_3d = true
+	pass3_viewport.transparent_bg = false
+	pass3_viewport.render_target_clear_mode = SubViewport.CLEAR_MODE_ALWAYS
+	pass3_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	canvas_container.add_child(pass3_viewport) # Nested inside container to draw to screen
+	
+	pass3_rect = ColorRect.new()
+	pass3_rect.size = current_preset.target_resolution
+	pass3_rect.custom_minimum_size = current_preset.target_resolution
+	pass3_viewport.add_child(pass3_rect)
+	
+	pass3_material = ShaderMaterial.new()
+	pass3_rect.material = pass3_material
+	
+	# Link Pass 3 to read Pass 2's warped geometric output
+	pass3_material.set_shader_parameter("u_warped_texture", pass2_viewport.get_texture())
 
 func setup_interface_layer() -> void:
-	# Ensure it binds directly to the global class variable
 	var ui_layer = CanvasLayer.new()
 	add_child(ui_layer)
 	
@@ -135,7 +163,6 @@ func setup_interface_layer() -> void:
 	main_layout.mouse_filter = Control.MOUSE_FILTER_PASS
 	ui_layer.add_child(main_layout)
 	
-	# Replace your top_status_holder block in MainManager.gd with this:
 	top_status_holder = PanelContainer.new()
 	top_status_holder.mouse_filter = Control.MOUSE_FILTER_PASS
 	var style = StyleBoxFlat.new()
@@ -147,7 +174,6 @@ func setup_interface_layer() -> void:
 	top_hbox.mouse_filter = Control.MOUSE_FILTER_PASS
 	top_status_holder.add_child(top_hbox)
 	
-	# Pushes a dedicated spacer block to keep performance data tucked flat right
 	var top_banner_expanding_spacer = Control.new()
 	top_banner_expanding_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top_hbox.add_child(top_banner_expanding_spacer)
@@ -197,29 +223,48 @@ func setup_interface_layer() -> void:
 	btn_start_menu.pressed.connect(_on_start_button_pressed)
 	bottom_toolbar.add_child(btn_start_menu)
 
-func _on_select_button_pressed() -> void:
+	# CRITICAL COMPILER CORRECTION: 
+	# Let setup finish cleanly without querying uncompiled shader source data yet!
+	active_shader_layer = 0
 
-	# 1. Flip our internal focus layer variable (0 -> 1 -> 0)
-	active_shader_layer = posmod(active_shader_layer + 1, 2)
+func _on_select_button_pressed() -> void:
+	# 1. Cycle focus cleanly between 3 discrete layers (0 -> 1 -> 2 -> 0)
+	active_shader_layer = posmod(active_shader_layer + 1, 3)
 	
-	# 🌟 THE FIX: Force the UI selection pointer to reset back to zero before rebuilding the arrays
+	# Reset the UI pointer safely before loading new parameter variables
 	control_panel.active_index = 0
 	control_panel.active_sub_channel = 0
 	
-	if active_shader_layer == 0:
-		print("Console Focus: Pass 1 (Pattern Generator)")
-		control_panel.load_shader_source(pass1_material.shader.code)
+	# 2. Select the material based on the active layer
+	var active_mat: ShaderMaterial = null
+	
+	match active_shader_layer:
+		0:
+			print("Console Focus: [PASS 1 - GENERATIVE MATH]")
+			active_mat = pass1_material
+		1:
+			print("Console Focus: [PASS 2 - GEOMETRIC WARPING]")
+			active_mat = pass2_material
+		2:
+			print("Console Focus: [PASS 3 - POST-PROCESS FILTERS]")
+			active_mat = pass3_material
+
+	# 3. Securely ingest the active shader parameters into the DynamicUI control block
+	if active_mat and active_mat.shader:
+		control_panel.load_shader_source(active_mat.shader.code)
+		
+		# Synchronize live runtime parameters back into the UI cache values
 		for u_name in control_panel.uniform_values:
-			var val = pass1_material.get_shader_parameter(u_name)
-			if val != null: control_panel.uniform_values[u_name] = val
+			var val = active_mat.get_shader_parameter(u_name)
+			if val != null: 
+				control_panel.uniform_values[u_name] = val
 	else:
-		print("Console Focus: Pass 2 (Animation Effects)")
-		control_panel.load_shader_source(pass2_material.shader.code)
-		for u_name in control_panel.uniform_values:
-			var val = pass2_material.get_shader_parameter(u_name)
-			if val != null: control_panel.uniform_values[u_name] = val
+		# Safety guard if a shader pass is temporarily empty or uncompiled
+		control_panel.parsed_uniforms.clear()
+		control_panel.uniform_values.clear()
+		print("⚠️ Warning: Focused layer material or shader is unassigned.")
 			
-	# 2. Force the text ribbon across the top of the screen to redraw itself completely
+	# 4. Redraw the HUD status banner text across the top of the device screen
 	control_panel.update_status_readout()
 
 func _on_start_button_pressed() -> void:
@@ -293,15 +338,17 @@ func close_fast_travel_menu() -> void:
 	menu_overlay_panel.queue_free()
 	menu_overlay_panel = null
 
-
 func _process(delta: float) -> void:
 	current_time += delta
-	if current_time > 7200.0: current_time = 0.0 
+	if current_time > 7200.0: current_time = 0.0 # Prevents floating-point precision loss
 	
+	# Keep all three simulation layers running on the exact same temporal clock ticking rate
 	if pass1_material and pass1_material.shader:
 		pass1_material.set_shader_parameter("u_time", current_time)
 	if pass2_material and pass2_material.shader:
 		pass2_material.set_shader_parameter("u_time", current_time)
+	if pass3_material and pass3_material.shader:
+		pass3_material.set_shader_parameter("u_time", current_time)
 		
 	# Execute hardware diagnostic checks every processing frame
 	_check_hardware_gpu_safety()
@@ -337,12 +384,18 @@ func _check_hardware_gpu_safety() -> void:
 				
 				label_safety_alert.text = "⚠️ VRAM/PERFORMANCE OVERLOAD PREVENTED: CLAMPING NOISE DETAIL"
 				get_tree().create_timer(4.0).timeout.connect(func(): label_safety_alert.text = "")
-
+				
 func _on_ui_uniform_modified(u_name: String, u_value: Variant) -> void:
-	if active_shader_layer == 0 and pass1_material:
-		pass1_material.set_shader_parameter(u_name, u_value)
-	elif active_shader_layer == 1 and pass2_material:
-		pass2_material.set_shader_parameter(u_name, u_value)
+	# Route the parameters dynamically based on which pass is currently selected
+	match active_shader_layer:
+		0:
+			if pass1_material: pass1_material.set_shader_parameter(u_name, u_value)
+		1:
+			if pass2_material: pass2_material.set_shader_parameter(u_name, u_value)
+		2:
+			if pass3_material: pass3_material.set_shader_parameter(u_name, u_value)
+			
+	# Cache the modified parameter into your current active preset resource for exports
 	current_preset.uniform_values[u_name] = u_value
 
 func save_current_pattern_preset() -> void:
@@ -375,9 +428,10 @@ func save_current_pattern_preset() -> void:
 	control_panel.label_status.text = " ✅ COPIED %d PARAMETERS FROM %s TO CLIPBOARD! " % [active_params.size(), layer_label]
 
 
-
 func load_default_test_shaders() -> void:
-	# PASS 1: The Inigo Quilez Domain Warping Pattern
+	# =========================================================================
+	# PASS 1: INIGO QUILEZ DOMAIN WARPING (GENERATIVE MATH)
+	# =========================================================================
 	var p1_src = """
 	shader_type canvas_item;
 	uniform float u_time;
@@ -389,12 +443,7 @@ func load_default_test_shaders() -> void:
 	// CAT: Warping Calculations
 	// DESC: Controls absolute topological distortion strength.
 	uniform float u_warp_strength = 1.1;
-	
-	// DESC: Adjusts fractal Brownian depth loops (1.0 to 5.0).
 	uniform float u_noise_detail = 4.0;
-	
-	// CAT: Fluid Motion
-	// DESC: Changes global texture drift tracking velocity.
 	uniform float u_flow_speed = 0.4;
 	
 	// CAT: Aesthetics & Tinting
@@ -428,23 +477,103 @@ func load_default_test_shaders() -> void:
 	}
 	"""
 	
-	# PASS 2: Animation Effect Filter
-	var effect_shader_file_path = "res://EffectsShader.gdshader" 
-	var p2_src = ""
+	# =========================================================================
+	# PASS 2: GEOMETRIC KALEIDOSCOPE WARP
+	# =========================================================================
+	var p2_src = """
+	shader_type canvas_item;
+	uniform sampler2D u_pattern_texture : hint_screen_texture, filter_linear_mipmap;
+	uniform float u_time;
 	
-	if FileAccess.file_exists(effect_shader_file_path):
-		p2_src = FileAccess.get_file_as_string(effect_shader_file_path)
-		print("✅ SUCCESS: Ingested %d characters from your effect library file." % p2_src.length())
-	else:
-		# Fallback placeholder string just in case the file path drops out
-		p2_src = "shader_type canvas_item; uniform sampler2D u_pattern_texture; void fragment() { COLOR = texture(u_pattern_texture, UV); }"
-		print("⚠️ WARNING: Could not find your shader file. Loading transparent fallback pass.")
+	// CAT: Geometric Setup
+	// DESC: Number of reflective segments across the radial circle matrix.
+	uniform float u_segments = 6.0;
 	
+	// DESC: Rotational offset velocity tracking factor.
+	uniform float u_rotation_speed = 0.2;
+	
+	void fragment() {
+		// Translate coordinates to center anchor point (-0.5 to 0.5)
+		vec2 uv = UV - 0.5;
+		
+		// Convert Cartesian space coordinates directly into Polar coordinate arcs
+		float r = length(uv);
+		float a = atan(uv.y, uv.x) + (u_time * u_rotation_speed);
+		
+		// Calculate segment angle boundaries
+		float angle_step = 2.0 * 3.14159265 / max(u_segments, 1.0);
+		
+		// Fold space symmetrically across segments
+		a = mod(a, angle_step);
+		a = abs(a - angle_step * 0.5);
+		
+		// Convert back to Cartesian space coordinates mapped to standard UV bounds
+		vec2 warped_uv = vec2(cos(a), sin(a)) * r + 0.5;
+		
+		// Enforce safety boundary clipping clamps
+		warped_uv = clamp(warped_uv, 0.001, 0.999);
+		
+		COLOR = texture(u_pattern_texture, warped_uv);
+	}
+	"""
+	
+	# =========================================================================
+	# PASS 3: ANALOG EDGE GLOW FILTER
+	# =========================================================================
+	var p3_src = """
+	shader_type canvas_item;
+	uniform sampler2D u_warped_texture : hint_screen_texture, filter_linear_mipmap;
+	uniform float u_time;
+	
+	// CAT: Glow Intensity
+	// DESC: Structural mathematical edge amplification threshold limits.
+	uniform float u_edge_threshold = 0.15;
+	
+	// DESC: Absolute luminous blending emission amplification intensity scale factor.
+	uniform float u_glow_intensity = 2.5;
+	
+	// DESC: Pixel sampling search step boundary distance offset size.
+	uniform vec2 u_step_offset = vec2(0.003, 0.003);
+	
+	void fragment() {
+		vec2 uv = UV;
+		
+		// Core color sample extraction
+		vec4 center_color = texture(u_warped_texture, uv);
+		
+		// Take surrounding neighbor point luminance sample metrics (Sobel kernel layout)
+		float c  = (center_color.r + center_color.g + center_color.b) / 3.0;
+		float left  = (texture(u_warped_texture, uv - vec2(u_step_offset.x, 0.0)).g);
+		float right = (texture(u_warped_texture, uv + vec2(u_step_offset.x, 0.0)).g);
+		float up    = (texture(u_warped_texture, uv - vec2(0.0, u_step_offset.y)).g);
+		float down  = (texture(u_warped_texture, uv + vec2(0.0, u_step_offset.y)).g);
+		
+		// Structural mathematical spatial difference calculations
+		float edge_delta = abs(c - left) + abs(c - right) + abs(c - up) + abs(c - down);
+		
+		// Execute mathematical stepping rules against active boundary thresholds
+		float edge_mask = smoothstep(u_edge_threshold, u_edge_threshold + 0.1, edge_delta);
+		
+		// Amplify color matrices across detected structural boundaries
+		vec3 glowing_borders = center_color.rgb * edge_mask * u_glow_intensity;
+		
+		// Composite final rendering pass blend data array mix layers together cleanly
+		COLOR = vec4(center_color.rgb + glowing_borders, center_color.a);
+	}
+	"""
+	
+	# Compile and assign resources cleanly
 	var s1 = Shader.new(); s1.code = p1_src
 	var s2 = Shader.new(); s2.code = p2_src
+	var s3 = Shader.new(); s3.code = p3_src
+	
 	pass1_material.shader = s1
 	pass2_material.shader = s2
+	pass3_material.shader = s3
 	
-	# FORCE RENDERING ASSIGNMENT SYNC HERE
+	# Reinitialize the texture pipeline links firmly
 	pass2_material.set_shader_parameter("u_pattern_texture", pass1_viewport.get_texture())
+	pass3_material.set_shader_parameter("u_warped_texture", pass2_viewport.get_texture())
+	
+	# Default control UI focus states back onto Pass 1 pattern math variables
 	control_panel.load_shader_source(p1_src)

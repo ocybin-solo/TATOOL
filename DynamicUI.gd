@@ -337,8 +337,11 @@ func update_status_readout() -> void:
 	# Query the registered global group to dynamically find our current active pass layer index
 	var layer_header: String = "[PASS 1: PATTERN]"
 	var main_manager = get_tree().get_first_node_in_group("main_manager")
-	if main_manager and main_manager.get("active_shader_layer") == 1:
-		layer_header = "[PASS 2: EFFECTS]"
+	if main_manager:
+		match main_manager.get("active_shader_layer"):
+			0: layer_header = "[PASS 1: PATTERN]"
+			1: layer_header = "[PASS 2: WARP]"
+			2: layer_header = "[PASS 3: FILTERS]"
 	
 	# --- UPGRADED REAL-TIME HUD STATUS STRING CONCATENATION ---
 	label_status.text = "  %s  •  PARAM: %s (%s)%s  •  VALUE: %s  •  SENSITIVITY: %s  \nℹ️  %s  " % [
