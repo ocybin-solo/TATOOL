@@ -370,9 +370,30 @@ func get_sub_channel_name(u_type: String) -> String:
 		var channels = [" [RED]", " [GREEN]", " [BLUE]", " [ALPHA]"]
 		return channels[active_sub_channel]
 	return ""
-
 func update_status_readout() -> void:
-	if parsed_uniforms.is_empty(): return
+	# Query the registered global group to dynamically find our current active pass layer index
+	var layer_header: String = "[PASS 1: PATTERN]"
+	var main_manager = get_tree().get_first_node_in_group("main_manager")
+	
+	if main_manager:
+		match main_manager.get("active_shader_layer"):
+			0: layer_header = "[PASS 1: PATTERN]"
+			1: layer_header = "[PASS 2: WARP]"
+			2: layer_header = "[PASS 3: FILTERS]"
+
+	# --- FIXED BREAKOUT VALVE BLOCK ---
+	# If a pass contains no customizable parameters, update the text banner to show a clean state
+	if parsed_uniforms.is_empty():
+		label_status.text = "  %s  •  NO CONFIGURABLE UNIFORMS DETECTED IN ACTIVE SHADER MODULE.  " % layer_header
+		if label_sens_indicator:
+			label_sens_indicator.text = str(sensitivity)
+		# Clear out the color picker widget instantly if an empty pass is targeted
+		if active_color_picker:
+			active_color_picker.queue_free()
+			active_color_picker = null
+		return # Safe breakout after drawing the empty status ribbon update
+		
+	# Process normal parameter text compilation if variables are present
 	var active = parsed_uniforms[active_index]
 	var u_type = active["type"]
 	if u_type == "float": btn_channel.text = "FLOAT"
@@ -384,35 +405,24 @@ func update_status_readout() -> void:
 	var sens_str = str(sensitivity)
 	var desc_str = uniform_descriptions.get(p_name, "Adjustable hardware matrix parameter.")
 	
-	# Query the registered global group to dynamically find our current active pass layer index
-	var layer_header: String = "[PASS 1: PATTERN]"
-	var main_manager = get_tree().get_first_node_in_group("main_manager")
-	if main_manager:
-		match main_manager.get("active_shader_layer"):
-			0: layer_header = "[PASS 1: PATTERN]"
-			1: layer_header = "[PASS 2: WARP]"
-			2: layer_header = "[PASS 3: FILTERS]"
-	
-	# --- UPGRADED REAL-TIME HUD STATUS STRING CONCATENATION ---
+	# Upgraded HUD Status Concat Matrix Layout formatting
 	label_status.text = "  %s  •  PARAM: %s (%s)%s  •  VALUE: %s  •  SENSITIVITY: %s  \nℹ️  %s  " % [
 		layer_header, p_name, u_type, sub_ch, val_str, sens_str, desc_str
 	]
 	
 	if label_sens_indicator:
 		label_sens_indicator.text = sens_str
-
-	# ==================== PASTE THE LIFECYCLE BLOCK HERE ====================
+		
+	# Dynamic color picker panel box positioning lifecycle
 	if active["type"] == "vec4":
 		if not active_color_picker:
 			active_color_picker = ColorPicker.new()
-			
 			active_color_picker.picker_shape = ColorPicker.SHAPE_HSV_WHEEL
 			active_color_picker.color_modes_visible = false
 			active_color_picker.sampler_visible = false
 			active_color_picker.sliders_visible = false
 			active_color_picker.presets_visible = false
 			active_color_picker.hex_visible = false
-			
 			active_color_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			active_color_picker.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 			
@@ -423,7 +433,6 @@ func update_status_readout() -> void:
 				uniform_values[p_name] = new_color
 				uniform_changed.emit(p_name, new_color)
 			)
-			
 			right_upper_dock.add_child(active_color_picker)
 	else:
 		if active_color_picker:

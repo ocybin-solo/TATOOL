@@ -581,10 +581,9 @@ func _process_live_automation(delta: float) -> void:
 		
 	control_panel.update_status_readout()
 
-
 func load_default_test_shaders() -> void:
 	# =========================================================================
-	# PASS 1: MATRIX-WARPED INTERPOLATED DOMAIN GENERATOR
+	# PASS 1: INIGO QUILEZ DOMAIN WARPING (GENERATIVE MATH)
 	# =========================================================================
 	var p1_src = """
 	shader_type canvas_item;
@@ -602,6 +601,7 @@ func load_default_test_shaders() -> void:
 	uniform float u_warp_twist = 0.5;
 	uniform float u_warp_strength = 1.1;
 	uniform float u_noise_detail = 4.0;
+	uniform float u_noise_detail_limit = 5.0;
 	uniform float u_flow_speed = 0.4;
 	
 	// CAT: Aesthetics & Tinting
@@ -625,32 +625,25 @@ func load_default_test_shaders() -> void:
 		return value;
 	}
 	
-	// Helper function to build a 2D rotation matrix on the GPU
 	mat2 rotate2d(float angle) {
 		return mat2(vec2(cos(angle), -sin(angle)),
 		            vec2(sin(angle), cos(angle)));
 	}
 	
 	void fragment() {
-		// 1. Center space and apply the custom scale matrix multiplier
 		vec2 st = (UV - 0.5) * u_space_scale;
-		
-		// 2. Apply the primary base rotation matrix to the entire space grid
 		st = rotate2d(u_matrix_rotate) * st;
-		st += 0.5; // Translate back to procedural sampling bounds
+		st += 0.5;
 		
 		float scaled_time = u_time * u_flow_speed;
 		mat2 twist_mat = rotate2d(u_warp_twist);
 		
-		// 3. THE MAGIC: Rotate the coordinates *inside* the nesting layers of the warp!
 		vec2 q = vec2(fbm(st + vec2(scaled_time * 0.2)), 
 		              fbm(st + vec2(5.2, 1.3) + vec2(scaled_time * 0.15)));
 		
-		// Multiply the secondary calculation layer 'q' by our twist matrix
 		vec2 r = vec2(fbm(st + u_warp_strength * (twist_mat * q) + vec2(1.7, 9.2) + vec2(scaled_time * 0.3)), 
 		              fbm(st + u_warp_strength * (twist_mat * q) + vec2(8.3, 2.8) + vec2(scaled_time * 0.05)));
 		
-		// Calculate final field value
 		float final_field_math = fbm(st + u_warp_strength * r);
 		
 		vec4 core_bg = mix(vec4(0.02, 0.02, 0.05, 1.0), vec4(0.12, 0.0, 0.22, 1.0), clamp(length(q), 0.0, 1.0));
@@ -659,12 +652,9 @@ func load_default_test_shaders() -> void:
 	"""
 	
 	# =========================================================================
-	# PASS 2: GEOMETRIC KALEIDOSCOPE WARP (CLAUDE FIX INTEGRATED)
+	# INITIALIZE EFFECT PRESET DICTIONARY LIBRARIES
 	# =========================================================================
-
-
-	# ==================== POPULATE PRESET LIBRARIES AND DEFAULT TO PASSTHROUGH ====================
-	# 1. Store Pass 2 choices
+	# Populate Pass 2 Library
 	pass2_library["None Selected"] = PASSTHROUGH_SHADER_CODE
 	pass2_library["Kaleidoscope"] = """
 	shader_type canvas_item;
@@ -687,7 +677,7 @@ func load_default_test_shaders() -> void:
 	}
 	"""
 	
-	# 2. Store Pass 3 choices (Note: reads u_warped_texture)
+	# Populate Pass 3 Library
 	pass3_library["None Selected"] = """
 	shader_type canvas_item;
 	uniform sampler2D u_warped_texture : filter_linear;
@@ -718,23 +708,27 @@ func load_default_test_shaders() -> void:
 		COLOR = vec4(center_color.rgb + glowing_borders, center_color.a);
 	}
 	"""
+
+	# =========================================================================
+	# COMPILE & HYDRATE CORE INSTANCE OBJECTS FOR BOOT
+	# =========================================================================
 	var s1 = Shader.new()
 	s1.code = p1_src
 	
 	var s2 = Shader.new()
-	s2.code = pass2_library["None Selected"] # Compiles raw pass-through on boot
+	s2.code = pass2_library["None Selected"] # Defaults to Pass-Through
 	
 	var s3 = Shader.new()
-	s3.code = pass3_library["None Selected"] # Compiles raw pass-through on boot
+	s3.code = pass3_library["None Selected"] # Defaults to Pass-Through
 	
-	# Bind the actual live shader resources directly onto the materials
+	# Attach shaders to materials cleanly
 	pass1_material.shader = s1
 	pass2_material.shader = s2
 	pass3_material.shader = s3
 	
-	# Firmly establish the texture processing lines
+	# Secure pipeline buffer textures links
 	pass2_material.set_shader_parameter("u_pattern_texture", pass1_viewport.get_texture())
 	pass3_material.set_shader_parameter("u_warped_texture", pass2_viewport.get_texture())
 	
-	# Safely stream the text properties into the dynamic control block
+	# Ingest Pass 1 code variables directly into the Dynamic UI panel
 	control_panel.load_shader_source(p1_src)
