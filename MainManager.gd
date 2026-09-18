@@ -41,11 +41,15 @@ var pass3_material: ShaderMaterial
 var current_preset: PatternPreset
 var current_time: float = 0.0
 
-# Stores the raw code text for your available effects
+
+# ==================== TRIPLE-PASS SHADER LIBRARIES (FULLY UPGRADED) ====================
+# Stores the raw code text for all available modular options
+var pass1_library: Dictionary = {}
 var pass2_library: Dictionary = {}
 var pass3_library: Dictionary = {}
 
-# Tracks what is currently selected for each pass
+# Tracks what is currently selected for each layer
+var active_pass1_shader_name: String = "Domain Warp"
 var active_pass2_shader_name: String = "None Selected"
 var active_pass3_shader_name: String = "None Selected"
 
@@ -183,7 +187,6 @@ func setup_dual_pass_pipeline() -> void:
 	pass2_material.set_shader_parameter("u_pattern_texture", pass1_viewport.get_texture())
 	pass3_material.set_shader_parameter("u_warped_texture", pass2_viewport.get_texture())
 
-
 func setup_interface_layer() -> void:
 	var ui_layer = CanvasLayer.new()
 	add_child(ui_layer)
@@ -225,36 +228,41 @@ func setup_interface_layer() -> void:
 	control_panel.uniform_changed.connect(_on_ui_uniform_modified)
 	
 	# =========================================================================
-	# 🕹️ UNIFIED THREE-BUTTON HARDWARE CLUSTER ROW
+	# 🕹️ UPGRADED HARWARE TOOLBAR: FOUR-BUTTON INTERACTIVE CLUSTER ROW
 	# =========================================================================
 	var bottom_toolbar = HBoxContainer.new()
 	bottom_toolbar.custom_minimum_size = Vector2(0, 50)
 	bottom_toolbar.alignment = BoxContainer.ALIGNMENT_CENTER
 	main_layout.add_child(bottom_toolbar)
 	
-	# 1. SELECT (Left Side of Group)
+	# 1. SELECT (Layer Cycler)
 	var btn_select_layer = Button.new()
 	btn_select_layer.text = "🔄 SELECT"
 	btn_select_layer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	btn_select_layer.pressed.connect(_on_select_button_pressed)
 	bottom_toolbar.add_child(btn_select_layer)
 	
-	## 2. 🕹️ AUTOMATION SCREENSAVER (Center Anchor Toggle)
-	#var btn_save = Button.new()
-	#btn_save.text = "🕹️ AUTOMATE CONTINUOUSLY"
-	#btn_save.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	#btn_save.pressed.connect(toggle_live_automation_screensaver)
-	#bottom_toolbar.add_child(btn_save)
+	# 2. EXPORT PACK (Clipboard/File Data Dump Container)
+	var btn_save = Button.new()
+	btn_save.text = "💾 EXPORT PACK"
+	btn_save.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn_save.pressed.connect(save_current_pattern_preset)
+	bottom_toolbar.add_child(btn_save)
 	
-	# 3. START MENU (Right Side of Group)
+	# 3. ⚠️ RESET (Dedicated Factory Parameter Reset Trigger Slot)
+	var btn_reset_params = Button.new()
+	btn_reset_params.text = "⚠️ RESET"
+	btn_reset_params.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn_reset_params.pressed.connect(_on_global_factory_reset_pressed)
+	bottom_toolbar.add_child(btn_reset_params)
+	
+	# 4. START (Module Fast-Travel Engine Selector)
 	var btn_start_menu = Button.new()
 	btn_start_menu.text = "🕹️ START"
 	btn_start_menu.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	btn_start_menu.pressed.connect(_on_start_button_pressed)
 	bottom_toolbar.add_child(btn_start_menu)
 
-	# CRITICAL COMPILER CORRECTION: 
-	# Let setup finish cleanly without querying uncompiled shader source data yet!
 	active_shader_layer = 0
 
 func toggle_live_automation_screensaver() -> void:
@@ -329,9 +337,7 @@ func _on_start_button_pressed() -> void:
 		open_fast_travel_menu()
 	else:
 		close_fast_travel_menu()
-
 func open_fast_travel_menu() -> void:
-	# Force the UI to refresh its category dictionary based on the currently active layer code
 	var active_mat: ShaderMaterial = null
 	match active_shader_layer:
 		0: active_mat = pass1_material
@@ -343,7 +349,7 @@ func open_fast_travel_menu() -> void:
 
 	# --- INTEGRATED SHADER LIBRARIES MATRIX SELECTION SWITCH ---
 	if active_shader_layer == 0:
-		active_menu_categories = control_panel.shader_categories.keys()
+		active_menu_categories = pass1_library.keys() # Hooks to pattern list!
 	elif active_shader_layer == 1:
 		active_menu_categories = pass2_library.keys()
 	elif active_shader_layer == 2:
@@ -393,30 +399,41 @@ func redraw_fast_travel_menu() -> void:
 			lbl.text = "    %s    " % active_menu_categories[i].to_upper()
 			lbl.add_theme_color_override("font_color", Color.DARK_GRAY)
 		menu_list_box.add_child(lbl)
+
 func close_fast_travel_menu() -> void:
 	if not menu_overlay_panel: return
 	
 	if not active_menu_categories.is_empty() and active_menu_index < active_menu_categories.size():
-		var selected_cat = active_menu_categories[active_menu_index]
+		var choice = active_menu_categories[active_menu_index]
 		
-		# Pull the array of uniforms assigned strictly to this category
-		var targeted_uniform_list = control_panel.shader_categories.get(selected_cat, [])
-		
-		if not targeted_uniform_list.is_empty():
-			# Update the dynamic UI state trackers with our isolated module parameters
-			control_panel.current_active_category = selected_cat
-			control_panel.active_category_uniforms = targeted_uniform_list
-			control_panel.relative_category_index = 0
+		# =========================================================================
+		# TRIPLE-PASS SHADER HOT-RELOAD COMPILER MATRIX
+		# =========================================================================
+		if active_shader_layer == 0:
+			# Pass 1 Pattern Hot-Reload compilation event!
+			active_pass1_shader_name = choice
+			var new_shader = Shader.new()
+			new_shader.code = pass1_library[choice]
+			pass1_material.shader = new_shader
+			control_panel.load_shader_source(new_shader.code)
 			
-			# Align the primary active loop selection to the first uniform in this group
-			var first_param_name = targeted_uniform_list[0]["name"]
-			for idx in range(control_panel.parsed_uniforms.size()):
-				if control_panel.parsed_uniforms[idx]["name"] == first_param_name:
-					control_panel.active_index = idx
-					break
-		else:
-			# If category is empty, wipe bounds to use general master array loops
-			control_panel.active_category_uniforms.clear()
+		elif active_shader_layer == 1:
+			# Pass 2 Warp Hot-Reload compilation event!
+			active_pass2_shader_name = choice
+			var new_shader = Shader.new()
+			new_shader.code = pass2_library[choice]
+			pass2_material.shader = new_shader
+			pass2_material.set_shader_parameter("u_pattern_texture", pass1_viewport.get_texture())
+			control_panel.load_shader_source(new_shader.code)
+			
+		elif active_shader_layer == 2:
+			# Pass 3 Filter Hot-Reload compilation event!
+			active_pass3_shader_name = choice
+			var new_shader = Shader.new()
+			new_shader.code = pass3_library[choice]
+			pass3_material.shader = new_shader
+			pass3_material.set_shader_parameter("u_warped_texture", pass2_viewport.get_texture())
+			control_panel.load_shader_source(new_shader.code)
 			
 	control_panel.is_input_blocked = false
 	control_panel.update_status_readout()
@@ -580,88 +597,114 @@ func _process_live_automation(delta: float) -> void:
 		control_panel.uniform_values[p_name] = p["current"]
 		
 	control_panel.update_status_readout()
-	
-	
+
+
 func load_default_test_shaders() -> void:
 	# =========================================================================
-	# PASS 1: CELLULAR VORONOI MATRIX GENERATOR (GENERATIVE MATH)
+	# PASS 1 LIBRARY MODULES (RESTORING PATTERN 1 + UPGRADING VORONOI BACKGROUNDS)
 	# =========================================================================
-	var p1_src = """
+	var p1_domain_warp = """
 	shader_type canvas_item;
 	uniform float u_time;
-	
-	// CAT: Cellular Structure
-	// DESC: Multiplier factor for the total grid density scaling partition size.
-	uniform float u_cell_scale = 4.0;
-	
-	// DESC: Morph limits between rigid square grids (0.0) and chaotic organic layouts (1.0).
-	uniform float u_cell_mutation = 1.0;
-	
-	// CAT: Organic Fluidity
-	// DESC: Radial orbit tracking velocity multiplier for individual inner nuclei points.
-	uniform float u_nuclei_speed = 0.8;
-	
-	// CAT: Edge Cosmetics
-	// DESC: Sharpness contrast filter applied to the border gradient fields.
-	uniform float u_border_sharpness = 2.0;
-	
+	// CAT: Matrix Adjustments
+	// DESC: Rotates the underlying space calculation grid.
+	uniform float u_matrix_rotate = 0.0;
+	// DESC: Distorts and stretches the coordinate aspect scale.
+	uniform vec2 u_space_scale = vec2(1.0, 1.0);
+	// CAT: Warping Calculations
+	// DESC: Dictates how hard the internal noise loops twist into each other.
+	uniform float u_warp_twist = 0.5;
+	uniform float u_warp_strength = 1.1;
+	uniform float u_noise_detail = 4.0;
+	uniform float u_flow_speed = 0.4;
 	// CAT: Aesthetics & Tinting
 	// DESC: Main coloring vector array layer target tint.
 	uniform vec4 u_pattern_color : source_color = vec4(0.1, 0.7, 0.9, 1.0);
+	// DESC: Secondary custom background filler color space vector.
+	uniform vec4 u_background_color : source_color = vec4(0.02, 0.02, 0.05, 1.0);
 	
-	// Specialized 2D pseudorandom coordinate generator optimized for cell-space
-	vec2 random2(vec2 p) {
-		return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), 
-		                      dot(p, vec2(269.5, 183.3)))) * 43758.5453);
+	float hash2d(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
+	float value_noise(vec2 p) {
+		vec2 i = floor(p); vec2 f = fract(p);
+		vec2 u = f * f * (3.0 - 2.0 * f);
+		return mix(mix(hash2d(i + vec2(0.0, 0.0)), hash2d(i + vec2(1.0, 0.0)), u.x),
+				   mix(hash2d(i + vec2(0.0, 1.0)), hash2d(i + vec2(1.0, 1.0)), u.x), u.y);
 	}
-	
+	float fbm(vec2 p) {
+		float value = 0.0; float amplitude = 0.5; float frequency = 1.0;
+		for (int i = 0; i < 5; i++) {
+			if (float(i) >= u_noise_detail) break;
+			value += amplitude * value_noise(p * frequency);
+			frequency *= 2.0; amplitude *= 0.5;
+		}
+		return value;
+	}
+	mat2 rotate2d(float angle) {
+		return mat2(vec2(cos(angle), -sin(angle)), vec2(sin(angle), cos(angle)));
+	}
 	void fragment() {
-		// Normalize coordinates based on the custom cell layout density uniform
+		vec2 st = (UV - 0.5) * u_space_scale;
+		st = rotate2d(u_matrix_rotate) * st;
+		st += 0.5;
+		float scaled_time = u_time * u_flow_speed;
+		mat2 twist_mat = rotate2d(u_warp_twist);
+		vec2 q = vec2(fbm(st + vec2(scaled_time * 0.2)), fbm(st + vec2(5.2, 1.3) + vec2(scaled_time * 0.15)));
+		vec2 r = vec2(fbm(st + u_warp_strength * (twist_mat * q) + vec2(1.7, 9.2) + vec2(scaled_time * 0.3)), fbm(st + u_warp_strength * (twist_mat * q) + vec2(8.3, 2.8) + vec2(scaled_time * 0.05)));
+		float final_field_math = fbm(st + u_warp_strength * r);
+		vec4 dynamic_bg = mix(u_background_color, vec4(0.12, 0.0, 0.22, 1.0), clamp(length(q), 0.0, 1.0));
+		COLOR = mix(dynamic_bg, u_pattern_color, final_field_math) * (final_field_math * 1.5 + 0.3);
+	}
+	"""
+	
+	pass1_library["Domain Warp"] = p1_domain_warp
+	pass1_library["Voronoi Cells"] = """
+	shader_type canvas_item;
+	uniform float u_time;
+	// CAT: Cellular Structure
+	// DESC: Multiplier factor for the total grid density scaling partition size.
+	uniform float u_cell_scale = 4.0;
+	// DESC: Morph limits between rigid square grids (0.0) and chaotic organic layouts (1.0).
+	uniform float u_cell_mutation = 1.0;
+	// CAT: Organic Fluidity
+	// DESC: Radial orbit tracking velocity multiplier for individual inner nuclei points.
+	uniform float u_nuclei_speed = 0.8;
+	// CAT: Edge Cosmetics
+	// DESC: Sharpness contrast filter applied to the border gradient fields.
+	uniform float u_border_sharpness = 2.0;
+	// CAT: Aesthetics & Tinting
+	// DESC: Main coloring vector array layer target tint.
+	uniform vec4 u_pattern_color : source_color = vec4(0.1, 0.7, 0.9, 1.0);
+	// DESC: Customizable color picker target slot for negative cell space voids.
+	uniform vec4 u_background_color : source_color = vec4(0.02, 0.02, 0.06, 1.0);
+	
+	vec2 random2(vec2 p) {
+		return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))) * 43758.5453);
+	}
+	void fragment() {
 		vec2 st = UV * u_cell_scale;
-		
-		// Split space into integer grid tiles and fractional local cell coordinates
 		vec2 i_st = floor(st);
 		vec2 f_st = fract(st);
-		
-		float m_dist = 8.0; // Baseline minimum distance field boundary initialization
-		
-		// Iterate through a strict, high-performance 3x3 surrounding cell matrix block
+		float m_dist = 8.0;
 		for (int y = -1; y <= 1; y++) {
 			for (int x = -1; x <= 1; x++) {
 				vec2 neighbor = vec2(float(x), float(y));
-				
-				// Generate a unique pseudorandom core target position for this specific tile
 				vec2 point = random2(i_st + neighbor);
-				
-				// Animate the feature cell points inside their localized boundaries cleanly
 				point = 0.5 + 0.5 * sin(u_time * u_nuclei_speed + 6.2831 * point);
-				
-				// Apply the mutation clamp to blend between regular grids and pure chaos
 				point = mix(vec2(0.5, 0.5), point, u_cell_mutation);
-				
-				// Calculate vector difference to the current fragment pixel position
 				vec2 diff = neighbor + point - f_st;
 				float dist = length(diff);
-				
-				// Store the closest discovered distance field marker metric
 				m_dist = min(m_dist, dist);
 			}
 		}
-		
-		// Apply contrast sharpening calculations across the edge boundaries
 		float cell_vibrancy = 1.0 - m_dist;
 		cell_vibrancy = pow(cell_vibrancy, u_border_sharpness);
-		
-		// Mix background color space with the custom matrix tint vector cleanly
-		vec4 core_bg = vec4(0.02, 0.02, 0.06, 1.0);
-		COLOR = mix(core_bg, u_pattern_color, cell_vibrancy);
+		COLOR = mix(u_background_color, u_pattern_color, cell_vibrancy);
 	}
 	"""
 	
 	# =========================================================================
-	# INITIALIZE EFFECT PRESET DICTIONARY LIBRARIES
+	# INITIALIZE EFFECT PRESET DICTIONARY LIBRARIES FOR PASS 2 & 3
 	# =========================================================================
-	# Populate Pass 2 Library
 	pass2_library["None Selected"] = PASSTHROUGH_SHADER_CODE
 	pass2_library["Kaleidoscope"] = """
 	shader_type canvas_item;
@@ -684,7 +727,6 @@ func load_default_test_shaders() -> void:
 	}
 	"""
 	
-	# Populate Pass 3 Library
 	pass3_library["None Selected"] = """
 	shader_type canvas_item;
 	uniform sampler2D u_warped_texture : filter_linear;
@@ -717,10 +759,10 @@ func load_default_test_shaders() -> void:
 	"""
 
 	# =========================================================================
-	# COMPILE & HYDRATE Core INSTANCE OBJECTS FOR BOOT
+	# COMPILE DEFAULT OBJECTS AND BOOT UP CLEAR SLATE
 	# =========================================================================
 	var s1 = Shader.new()
-	s1.code = p1_src
+	s1.code = pass1_library["Domain Warp"]
 	
 	var s2 = Shader.new()
 	s2.code = pass2_library["None Selected"]
@@ -735,5 +777,41 @@ func load_default_test_shaders() -> void:
 	pass2_material.set_shader_parameter("u_pattern_texture", pass1_viewport.get_texture())
 	pass3_material.set_shader_parameter("u_warped_texture", pass2_viewport.get_texture())
 	
-	# Hydrate dynamic UI controller text blocks
-	control_panel.load_shader_source(p1_src)
+	control_panel.load_shader_source(s1.code)
+
+func _on_global_factory_reset_pressed() -> void:
+	if not control_panel or control_panel.parsed_uniforms.is_empty(): return
+	
+	print("⚠️ Master Reset: Wiping current focused layer uniforms to baseline default values.")
+	
+	for u in control_panel.parsed_uniforms:
+		var u_name = u["name"]
+		var u_type = u["type"]
+		
+		if u_name == "u_warp_frequency": control_panel.uniform_values[u_name] = Vector2(2.5, 2.5)
+		elif u_name == "u_cell_scale": control_panel.uniform_values[u_name] = 4.0
+		elif u_name == "u_cell_mutation": control_panel.uniform_values[u_name] = 1.0
+		elif u_name == "u_nuclei_speed": control_panel.uniform_values[u_name] = 0.8
+		elif u_name == "u_border_sharpness": control_panel.uniform_values[u_name] = 2.0
+		elif u_type == "float": control_panel.uniform_values[u_name] = 1.0
+		elif u_type == "vec2": control_panel.uniform_values[u_name] = Vector2(1.0, 1.0)
+		elif u_type == "vec4" and u_name == "u_background_color": 
+			if active_shader_layer == 0 and active_pass1_shader_name == "Voronoi Cells":
+				control_panel.uniform_values[u_name] = Color(0.02, 0.02, 0.06, 1.0)
+			else:
+				control_panel.uniform_values[u_name] = Color(0.02, 0.02, 0.05, 1.0)
+		elif u_type == "vec4": control_panel.uniform_values[u_name] = Color.CYAN
+		
+		if active_shader_layer == 0 and pass1_material:
+			pass1_material.set_shader_parameter(u_name, control_panel.uniform_values[u_name])
+		elif active_shader_layer == 1 and pass2_material:
+			pass2_material.set_shader_parameter(u_name, control_panel.uniform_values[u_name])
+		elif active_shader_layer == 2 and pass3_material:
+			pass3_material.set_shader_parameter(u_name, control_panel.uniform_values[u_name])
+			
+	if control_panel.active_color_picker:
+		var p_name = control_panel.parsed_uniforms[control_panel.active_index]["name"]
+		if control_panel.uniform_values.has(p_name):
+			control_panel.active_color_picker.color = control_panel.uniform_values[p_name]
+			
+	control_panel.update_status_readout()
