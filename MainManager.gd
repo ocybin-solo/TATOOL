@@ -580,74 +580,81 @@ func _process_live_automation(delta: float) -> void:
 		control_panel.uniform_values[p_name] = p["current"]
 		
 	control_panel.update_status_readout()
-
+	
+	
 func load_default_test_shaders() -> void:
 	# =========================================================================
-	# PASS 1: INIGO QUILEZ DOMAIN WARPING (GENERATIVE MATH)
+	# PASS 1: CELLULAR VORONOI MATRIX GENERATOR (GENERATIVE MATH)
 	# =========================================================================
 	var p1_src = """
 	shader_type canvas_item;
 	uniform float u_time;
 	
-	// CAT: Matrix Adjustments
-	// DESC: Rotates the underlying space calculation grid.
-	uniform float u_matrix_rotate = 0.0;
+	// CAT: Cellular Structure
+	// DESC: Multiplier factor for the total grid density scaling partition size.
+	uniform float u_cell_scale = 4.0;
 	
-	// DESC: Distorts and stretches the coordinate aspect scale.
-	uniform vec2 u_space_scale = vec2(1.0, 1.0);
+	// DESC: Morph limits between rigid square grids (0.0) and chaotic organic layouts (1.0).
+	uniform float u_cell_mutation = 1.0;
 	
-	// CAT: Warping Calculations
-	// DESC: Dictates how hard the internal noise loops twist into each other.
-	uniform float u_warp_twist = 0.5;
-	uniform float u_warp_strength = 1.1;
-	uniform float u_noise_detail = 4.0;
-	uniform float u_noise_detail_limit = 5.0;
-	uniform float u_flow_speed = 0.4;
+	// CAT: Organic Fluidity
+	// DESC: Radial orbit tracking velocity multiplier for individual inner nuclei points.
+	uniform float u_nuclei_speed = 0.8;
+	
+	// CAT: Edge Cosmetics
+	// DESC: Sharpness contrast filter applied to the border gradient fields.
+	uniform float u_border_sharpness = 2.0;
 	
 	// CAT: Aesthetics & Tinting
-	// DESC: Sets primary tint vector values.
+	// DESC: Main coloring vector array layer target tint.
 	uniform vec4 u_pattern_color : source_color = vec4(0.1, 0.7, 0.9, 1.0);
 	
-	float hash2d(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
-	float value_noise(vec2 p) {
-		vec2 i = floor(p); vec2 f = fract(p);
-		vec2 u = f * f * (3.0 - 2.0 * f);
-		return mix(mix(hash2d(i + vec2(0.0, 0.0)), hash2d(i + vec2(1.0, 0.0)), u.x),
-				   mix(hash2d(i + vec2(0.0, 1.0)), hash2d(i + vec2(1.0, 1.0)), u.x), u.y);
-	}
-	float fbm(vec2 p) {
-		float value = 0.0; float amplitude = 0.5; float frequency = 1.0;
-		for (int i = 0; i < 5; i++) {
-			if (float(i) >= u_noise_detail) break;
-			value += amplitude * value_noise(p * frequency);
-			frequency *= 2.0; amplitude *= 0.5;
-		}
-		return value;
-	}
-	
-	mat2 rotate2d(float angle) {
-		return mat2(vec2(cos(angle), -sin(angle)),
-		            vec2(sin(angle), cos(angle)));
+	// Specialized 2D pseudorandom coordinate generator optimized for cell-space
+	vec2 random2(vec2 p) {
+		return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), 
+		                      dot(p, vec2(269.5, 183.3)))) * 43758.5453);
 	}
 	
 	void fragment() {
-		vec2 st = (UV - 0.5) * u_space_scale;
-		st = rotate2d(u_matrix_rotate) * st;
-		st += 0.5;
+		// Normalize coordinates based on the custom cell layout density uniform
+		vec2 st = UV * u_cell_scale;
 		
-		float scaled_time = u_time * u_flow_speed;
-		mat2 twist_mat = rotate2d(u_warp_twist);
+		// Split space into integer grid tiles and fractional local cell coordinates
+		vec2 i_st = floor(st);
+		vec2 f_st = fract(st);
 		
-		vec2 q = vec2(fbm(st + vec2(scaled_time * 0.2)), 
-		              fbm(st + vec2(5.2, 1.3) + vec2(scaled_time * 0.15)));
+		float m_dist = 8.0; // Baseline minimum distance field boundary initialization
 		
-		vec2 r = vec2(fbm(st + u_warp_strength * (twist_mat * q) + vec2(1.7, 9.2) + vec2(scaled_time * 0.3)), 
-		              fbm(st + u_warp_strength * (twist_mat * q) + vec2(8.3, 2.8) + vec2(scaled_time * 0.05)));
+		// Iterate through a strict, high-performance 3x3 surrounding cell matrix block
+		for (int y = -1; y <= 1; y++) {
+			for (int x = -1; x <= 1; x++) {
+				vec2 neighbor = vec2(float(x), float(y));
+				
+				// Generate a unique pseudorandom core target position for this specific tile
+				vec2 point = random2(i_st + neighbor);
+				
+				// Animate the feature cell points inside their localized boundaries cleanly
+				point = 0.5 + 0.5 * sin(u_time * u_nuclei_speed + 6.2831 * point);
+				
+				// Apply the mutation clamp to blend between regular grids and pure chaos
+				point = mix(vec2(0.5, 0.5), point, u_cell_mutation);
+				
+				// Calculate vector difference to the current fragment pixel position
+				vec2 diff = neighbor + point - f_st;
+				float dist = length(diff);
+				
+				// Store the closest discovered distance field marker metric
+				m_dist = min(m_dist, dist);
+			}
+		}
 		
-		float final_field_math = fbm(st + u_warp_strength * r);
+		// Apply contrast sharpening calculations across the edge boundaries
+		float cell_vibrancy = 1.0 - m_dist;
+		cell_vibrancy = pow(cell_vibrancy, u_border_sharpness);
 		
-		vec4 core_bg = mix(vec4(0.02, 0.02, 0.05, 1.0), vec4(0.12, 0.0, 0.22, 1.0), clamp(length(q), 0.0, 1.0));
-		COLOR = mix(core_bg, u_pattern_color, final_field_math) * (final_field_math * 1.5 + 0.3);
+		// Mix background color space with the custom matrix tint vector cleanly
+		vec4 core_bg = vec4(0.02, 0.02, 0.06, 1.0);
+		COLOR = mix(core_bg, u_pattern_color, cell_vibrancy);
 	}
 	"""
 	
@@ -710,25 +717,23 @@ func load_default_test_shaders() -> void:
 	"""
 
 	# =========================================================================
-	# COMPILE & HYDRATE CORE INSTANCE OBJECTS FOR BOOT
+	# COMPILE & HYDRATE Core INSTANCE OBJECTS FOR BOOT
 	# =========================================================================
 	var s1 = Shader.new()
 	s1.code = p1_src
 	
 	var s2 = Shader.new()
-	s2.code = pass2_library["None Selected"] # Defaults to Pass-Through
+	s2.code = pass2_library["None Selected"]
 	
 	var s3 = Shader.new()
-	s3.code = pass3_library["None Selected"] # Defaults to Pass-Through
+	s3.code = pass3_library["None Selected"]
 	
-	# Attach shaders to materials cleanly
 	pass1_material.shader = s1
 	pass2_material.shader = s2
 	pass3_material.shader = s3
 	
-	# Secure pipeline buffer textures links
 	pass2_material.set_shader_parameter("u_pattern_texture", pass1_viewport.get_texture())
 	pass3_material.set_shader_parameter("u_warped_texture", pass2_viewport.get_texture())
 	
-	# Ingest Pass 1 code variables directly into the Dynamic UI panel
+	# Hydrate dynamic UI controller text blocks
 	control_panel.load_shader_source(p1_src)
