@@ -7,6 +7,8 @@ var upper_display_area: CenterContainer
 var main_layout: VBoxContainer
 var control_panel: VBoxContainer
 
+
+
 # Dedicated Visual Warning Label for the Safety Valve
 var label_safety_alert: Label
 var label_perf_monitor: Label
@@ -39,9 +41,40 @@ var pass3_material: ShaderMaterial
 var current_preset: PatternPreset
 var current_time: float = 0.0
 
+# Stores the raw code text for your available effects
+var pass2_library: Dictionary = {}
+var pass3_library: Dictionary = {}
+
+# Tracks what is currently selected for each pass
+var active_pass2_shader_name: String = "None Selected"
+var active_pass3_shader_name: String = "None Selected"
+
+# Universal transparent pass-through shader string
+const PASSTHROUGH_SHADER_CODE: String = """
+shader_type canvas_item;
+uniform sampler2D u_pattern_texture : filter_linear;
+void fragment() {
+	COLOR = texture(u_pattern_texture, UV);
+}
+"""
+
+
 # SELECT & START State Trackers
 var active_shader_layer: int = 0 
 var is_menu_open: bool = false
+
+# --- LIVE AUTOMATION ENGINE STATES ---
+var is_automation_active: bool = false
+var automation_timer: float = 0.0
+var automation_interval: float = 4.0 # How often parameters choose new targets (seconds)
+# Dedicated vector slots to handle color matrix transitions cleanly
+var current_auto_color: Color = Color(0.1, 0.7, 0.9, 1.0)
+var target_auto_color: Color = Color(0.1, 0.7, 0.9, 1.0)
+var color_blend_speed: float = 0.3 # Dictates how fast colors shift
+
+# Target configurations for the Random Walk
+# Structure: { "uniform_name": { "current": float, "target": float, "min": float, "max": float, "speed": float } }
+var automation_registry: Dictionary = {}
 
 
 
@@ -61,6 +94,9 @@ func _ready() -> void:
 	control_panel.custom_minimum_size = Vector2(0, 240) # Slightly expanded vertical container boundary box
 	control_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL # Forces vertical centering
 	control_panel.apply_orientation_layout_shift(false, top_status_holder)
+		# Initialize our random walk boundary system map
+	_init_automation_registry()
+	
 func setup_dual_pass_pipeline() -> void:
 	display_row_container = HBoxContainer.new()
 	display_row_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -203,12 +239,12 @@ func setup_interface_layer() -> void:
 	btn_select_layer.pressed.connect(_on_select_button_pressed)
 	bottom_toolbar.add_child(btn_select_layer)
 	
-	# 2. EXPORT PACK (Center Anchor)
-	var btn_save = Button.new()
-	btn_save.text = "💾 EXPORT PACK (.TRES)"
-	btn_save.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	btn_save.pressed.connect(save_current_pattern_preset)
-	bottom_toolbar.add_child(btn_save)
+	## 2. 🕹️ AUTOMATION SCREENSAVER (Center Anchor Toggle)
+	#var btn_save = Button.new()
+	#btn_save.text = "🕹️ AUTOMATE CONTINUOUSLY"
+	#btn_save.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	#btn_save.pressed.connect(toggle_live_automation_screensaver)
+	#bottom_toolbar.add_child(btn_save)
 	
 	# 3. START MENU (Right Side of Group)
 	var btn_start_menu = Button.new()
@@ -221,26 +257,41 @@ func setup_interface_layer() -> void:
 	# Let setup finish cleanly without querying uncompiled shader source data yet!
 	active_shader_layer = 0
 
+func toggle_live_automation_screensaver() -> void:
+	is_automation_active = not is_automation_active
+	
+	if is_automation_active:
+		print("🚀 Screensaver Mode Engaged: Continuous Random-Walk active.")
+		for p_name in automation_registry:
+			if control_panel.uniform_values.has(p_name):
+				automation_registry[p_name]["current"] = control_panel.uniform_values[p_name]
+				automation_registry[p_name]["target"] = control_panel.uniform_values[p_name]
+		
+		# Sync up the color vectors cleanly prior to starting the drift movement
+		if control_panel.uniform_values.has("u_pattern_color"):
+			current_auto_color = control_panel.uniform_values["u_pattern_color"]
+			target_auto_color = current_auto_color
+				
+		control_panel.is_input_blocked = true
+	else:
+		print("🛑 Screensaver Mode Disengaged: Returning control back to user layout.")
+		control_panel.is_input_blocked = false
+		control_panel.update_status_readout()
 func _on_select_button_pressed() -> void:
-	# 🔒 CRITICAL UI LOCK: Prevent layer switching while the fast-travel menu is open
+	# 🔒 CRITICAL UI LOCK: Prevent layer switching while the fast-travel menu is active
 	if is_menu_open: 
 		print("⚠️ UI Input Blocked: Cannot switch layers while Fast-Travel menu is active.")
 		return
 
-	# 1. Cycle focus cleanly between 3 discrete layers (0 -> 1 -> 2 -> 0)
+	# 1. Cycle focus cleanly forward between 3 discrete layers: 0 (Pass 1) -> 1 (Pass 2) -> 2 (Pass 3) -> 0
 	active_shader_layer = posmod(active_shader_layer + 1, 3)
 	
-	# Reset the UI pointer safely before loading new parameter variables
+	# Reset the active parameter navigation index pointer flags safely before reloading new variables
 	control_panel.active_index = 0
 	control_panel.active_sub_channel = 0
-	# 1. Cycle focus cleanly between 3 discrete layers (0 -> 1 -> 2 -> 0)
-	active_shader_layer = posmod(active_shader_layer + 1, 3)
+	control_panel.relative_category_index = 0
+	control_panel.active_category_uniforms.clear()
 	
-	# Reset the UI pointer safely before loading new parameter variables
-	control_panel.active_index = 0
-	control_panel.active_sub_channel = 0
-	
-	# 2. Select the material based on the active layer
 	var active_mat: ShaderMaterial = null
 	
 	match active_shader_layer:
@@ -254,22 +305,22 @@ func _on_select_button_pressed() -> void:
 			print("Console Focus: [PASS 3 - POST-PROCESS FILTERS]")
 			active_mat = pass3_material
 
-	# 3. Securely ingest the active shader parameters into the DynamicUI control block
+	# 2. THE RESTORATION CURE: Explicitly force-load the active pass shader code text block into the UI engine!
 	if active_mat and active_mat.shader:
 		control_panel.load_shader_source(active_mat.shader.code)
 		
-		# Synchronize live runtime parameters back into the UI cache values
+		# Synchronize live runtime parameters back into the UI values dictionary cache mapping bounds
 		for u_name in control_panel.uniform_values:
 			var val = active_mat.get_shader_parameter(u_name)
 			if val != null: 
 				control_panel.uniform_values[u_name] = val
 	else:
-		# Safety guard if a shader pass is temporarily empty or uncompiled
+		# Dynamic fallback safety wipe if a targeted pass is temporarily empty or unassigned
 		control_panel.parsed_uniforms.clear()
 		control_panel.uniform_values.clear()
 		print("⚠️ Warning: Focused layer material or shader is unassigned.")
 			
-	# 4. Redraw the HUD status banner text across the top of the device screen
+	# 3. Force the HUD status text banner ribbon across the top of the device screen to redraw itself completely
 	control_panel.update_status_readout()
 
 func _on_start_button_pressed() -> void:
@@ -290,7 +341,14 @@ func open_fast_travel_menu() -> void:
 	if active_mat and active_mat.shader:
 		control_panel.load_shader_source(active_mat.shader.code)
 
-	active_menu_categories = control_panel.shader_categories.keys()
+	# --- INTEGRATED SHADER LIBRARIES MATRIX SELECTION SWITCH ---
+	if active_shader_layer == 0:
+		active_menu_categories = control_panel.shader_categories.keys()
+	elif active_shader_layer == 1:
+		active_menu_categories = pass2_library.keys()
+	elif active_shader_layer == 2:
+		active_menu_categories = pass3_library.keys()
+		
 	if active_menu_categories.is_empty():
 		is_menu_open = false
 		control_panel.is_input_blocked = false
@@ -311,7 +369,6 @@ func open_fast_travel_menu() -> void:
 	menu_list_box.alignment = BoxContainer.ALIGNMENT_CENTER
 	menu_overlay_panel.add_child(menu_list_box)
 	
-	# 🌟 FIX THE LOOPS: Set our custom safety flag instead of modifying core input loops
 	control_panel.is_input_blocked = true
 	redraw_fast_travel_menu()
 
@@ -336,38 +393,42 @@ func redraw_fast_travel_menu() -> void:
 			lbl.text = "    %s    " % active_menu_categories[i].to_upper()
 			lbl.add_theme_color_override("font_color", Color.DARK_GRAY)
 		menu_list_box.add_child(lbl)
-		
 func close_fast_travel_menu() -> void:
 	if not menu_overlay_panel: return
 	
-	# Safety check: Ensure we actually have categories populated
 	if not active_menu_categories.is_empty() and active_menu_index < active_menu_categories.size():
 		var selected_cat = active_menu_categories[active_menu_index]
 		
-		# SAFE LOOKUP: Use .get() to prevent hard-crashes if a key is missing
-		var target_param_name = control_panel.shader_categories.get(selected_cat, "")
+		# Pull the array of uniforms assigned strictly to this category
+		var targeted_uniform_list = control_panel.shader_categories.get(selected_cat, [])
 		
-		if target_param_name != "":
-			# Walk the parsed uniforms array to find the index matching our parameter name
+		if not targeted_uniform_list.is_empty():
+			# Update the dynamic UI state trackers with our isolated module parameters
+			control_panel.current_active_category = selected_cat
+			control_panel.active_category_uniforms = targeted_uniform_list
+			control_panel.relative_category_index = 0
+			
+			# Align the primary active loop selection to the first uniform in this group
+			var first_param_name = targeted_uniform_list[0]["name"]
 			for idx in range(control_panel.parsed_uniforms.size()):
-				if control_panel.parsed_uniforms[idx]["name"] == target_param_name:
+				if control_panel.parsed_uniforms[idx]["name"] == first_param_name:
 					control_panel.active_index = idx
 					break
 		else:
-			print("⚠️ Fast-Travel: Category key '%s' not found in active UI cache." % selected_cat)
+			# If category is empty, wipe bounds to use general master array loops
+			control_panel.active_category_uniforms.clear()
 			
-	# 🌟 RESTORE INPUT CHANNEL ACCESS SAFELY
 	control_panel.is_input_blocked = false
 	control_panel.update_status_readout()
 	
-	# Clean up the UI overlay panel node from memory safely
 	menu_overlay_panel.queue_free()
 	menu_overlay_panel = null
 
 func _process(delta: float) -> void:
 	current_time += delta
 	if current_time > 7200.0: current_time = 0.0 # Prevents floating-point precision loss
-	
+		# Execute live automation calculations if toggled active
+	_process_live_automation(delta)
 	# Keep all three simulation layers running on the exact same temporal clock ticking rate
 	if pass1_material and pass1_material.shader:
 		pass1_material.set_shader_parameter("u_time", current_time)
@@ -453,20 +514,92 @@ func save_current_pattern_preset() -> void:
 	DisplayServer.clipboard_set(output)
 	control_panel.label_status.text = " ✅ COPIED %d PARAMETERS FROM %s TO CLIPBOARD! " % [active_params.size(), layer_label]
 
+## SCREENSAVER 
+
+func _init_automation_registry() -> void:
+	automation_registry.clear()
+	
+	# PASS 1 BOUNDARIES (Generative Math)
+	automation_registry["u_warp_strength"] = {"current": 1.1, "target": 1.1, "min": 0.2, "max": 2.5, "speed": 0.15}
+	automation_registry["u_noise_detail"]  = {"current": 4.0, "target": 4.0, "min": 2.0, "max": 5.0, "speed": 0.1}
+	automation_registry["u_flow_speed"]    = {"current": 0.4, "target": 0.4, "min": 0.05, "max": 1.2, "speed": 0.2}
+	
+	# PASS 2 BOUNDARIES (Geometric Kaleidoscope - Floating Point Continuous!)
+	automation_registry["u_segments"]       = {"current": 6.0, "target": 6.0, "min": 2.2, "max": 16.0, "speed": 0.3}
+	automation_registry["u_rotation_speed"] = {"current": 0.2, "target": 0.2, "min": -0.5, "max": 0.5, "speed": 0.25}
+	
+	# PASS 3 BOUNDARIES (Edge Glow Filter)
+	automation_registry["u_edge_threshold"] = {"current": 0.15, "target": 0.15, "min": 0.05, "max": 0.4, "speed": 0.2}
+	automation_registry["u_glow_intensity"] = {"current": 2.5, "target": 2.5, "min": 0.5, "max": 5.0, "speed": 0.4}
+
+	# Initialize our structural color states safely from the current panel cache
+	if control_panel and control_panel.uniform_values.has("u_pattern_color"):
+		current_auto_color = control_panel.uniform_values["u_pattern_color"]
+		target_auto_color = current_auto_color
+
+func _process_live_automation(delta: float) -> void:
+	if not is_automation_active: return
+	
+	automation_timer += delta
+	var force_new_targets: bool = false
+	
+	if automation_timer >= automation_interval:
+		automation_timer = 0.0
+		force_new_targets = true
+		
+		# 🌈 PICK A NEW VIBRANT COLOR TARGET
+		# 🌈 FIX: Generate rich, deep colors using HSV (Hue, Saturation, Value)
+		# Chooses a completely random color wheel angle, forces full saturation, 
+		# and caps the brightness value to a safe 0.75 so the edge glow never blows out.
+		target_auto_color = Color.from_hsv(randf(), 1.0, 0.75, 1.0)
+		
+	# 1. Smoothly blend the color matrix vectors across frames
+	current_auto_color = current_auto_color.lerp(target_auto_color, delta * color_blend_speed)
+	
+	if pass1_material:
+		pass1_material.set_shader_parameter("u_pattern_color", current_auto_color)
+	control_panel.uniform_values["u_pattern_color"] = current_auto_color
+		
+	# 2. Process all floating-point uniform paths in the registry
+	for p_name in automation_registry:
+		var p = automation_registry[p_name]
+		
+		if force_new_targets or abs(p["current"] - p["target"]) < 0.01:
+			p["target"] = randf_range(p["min"], p["max"])
+			
+		var blend_weight = delta * p["speed"]
+		p["current"] = lerp(p["current"], p["target"], blend_weight)
+		
+		if pass1_material and p_name in ["u_warp_strength", "u_noise_detail", "u_flow_speed"]:
+			pass1_material.set_shader_parameter(p_name, p["current"])
+		elif pass2_material and p_name in ["u_segments", "u_rotation_speed"]:
+			pass2_material.set_shader_parameter(p_name, p["current"])
+		elif pass3_material and p_name in ["u_edge_threshold", "u_glow_intensity"]:
+			pass3_material.set_shader_parameter(p_name, p["current"])
+			
+		control_panel.uniform_values[p_name] = p["current"]
+		
+	control_panel.update_status_readout()
+
+
 func load_default_test_shaders() -> void:
 	# =========================================================================
-	# PASS 1: INIGO QUILEZ DOMAIN WARPING (GENERATIVE MATH)
+	# PASS 1: MATRIX-WARPED INTERPOLATED DOMAIN GENERATOR
 	# =========================================================================
 	var p1_src = """
 	shader_type canvas_item;
 	uniform float u_time;
 	
-	// CAT: Spatial Configuration
-	// DESC: Modulates spatial compression grid boundaries.
-	uniform vec2 u_warp_frequency = vec2(2.5, 2.5);
+	// CAT: Matrix Adjustments
+	// DESC: Rotates the underlying space calculation grid.
+	uniform float u_matrix_rotate = 0.0;
+	
+	// DESC: Distorts and stretches the coordinate aspect scale.
+	uniform vec2 u_space_scale = vec2(1.0, 1.0);
 	
 	// CAT: Warping Calculations
-	// DESC: Controls absolute topological distortion strength.
+	// DESC: Dictates how hard the internal noise loops twist into each other.
+	uniform float u_warp_twist = 0.5;
 	uniform float u_warp_strength = 1.1;
 	uniform float u_noise_detail = 4.0;
 	uniform float u_flow_speed = 0.4;
@@ -491,12 +624,35 @@ func load_default_test_shaders() -> void:
 		}
 		return value;
 	}
+	
+	// Helper function to build a 2D rotation matrix on the GPU
+	mat2 rotate2d(float angle) {
+		return mat2(vec2(cos(angle), -sin(angle)),
+		            vec2(sin(angle), cos(angle)));
+	}
+	
 	void fragment() {
-		vec2 st = UV * u_warp_frequency;
+		// 1. Center space and apply the custom scale matrix multiplier
+		vec2 st = (UV - 0.5) * u_space_scale;
+		
+		// 2. Apply the primary base rotation matrix to the entire space grid
+		st = rotate2d(u_matrix_rotate) * st;
+		st += 0.5; // Translate back to procedural sampling bounds
+		
 		float scaled_time = u_time * u_flow_speed;
-		vec2 q = vec2(fbm(st + vec2(scaled_time * 0.2)), fbm(st + vec2(5.2, 1.3) + vec2(scaled_time * 0.15)));
-		vec2 r = vec2(fbm(st + u_warp_strength * q + vec2(1.7, 9.2) + vec2(scaled_time * 0.3)), fbm(st + u_warp_strength * q + vec2(8.3, 2.8) + vec2(scaled_time * 0.05)));
+		mat2 twist_mat = rotate2d(u_warp_twist);
+		
+		// 3. THE MAGIC: Rotate the coordinates *inside* the nesting layers of the warp!
+		vec2 q = vec2(fbm(st + vec2(scaled_time * 0.2)), 
+		              fbm(st + vec2(5.2, 1.3) + vec2(scaled_time * 0.15)));
+		
+		// Multiply the secondary calculation layer 'q' by our twist matrix
+		vec2 r = vec2(fbm(st + u_warp_strength * (twist_mat * q) + vec2(1.7, 9.2) + vec2(scaled_time * 0.3)), 
+		              fbm(st + u_warp_strength * (twist_mat * q) + vec2(8.3, 2.8) + vec2(scaled_time * 0.05)));
+		
+		// Calculate final field value
 		float final_field_math = fbm(st + u_warp_strength * r);
+		
 		vec4 core_bg = mix(vec4(0.02, 0.02, 0.05, 1.0), vec4(0.12, 0.0, 0.22, 1.0), clamp(length(q), 0.0, 1.0));
 		COLOR = mix(core_bg, u_pattern_color, final_field_math) * (final_field_math * 1.5 + 0.3);
 	}
@@ -505,76 +661,80 @@ func load_default_test_shaders() -> void:
 	# =========================================================================
 	# PASS 2: GEOMETRIC KALEIDOSCOPE WARP (CLAUDE FIX INTEGRATED)
 	# =========================================================================
-	var p2_src = """
+
+
+	# ==================== POPULATE PRESET LIBRARIES AND DEFAULT TO PASSTHROUGH ====================
+	# 1. Store Pass 2 choices
+	pass2_library["None Selected"] = PASSTHROUGH_SHADER_CODE
+	pass2_library["Kaleidoscope"] = """
 	shader_type canvas_item;
-	// CLAUDE FIX: Plain user-defined sampler without screen hint conflicts
 	uniform sampler2D u_pattern_texture : filter_linear;
 	uniform float u_time;
-	
 	// CAT: Geometric Setup
 	// DESC: Number of reflective segments across the radial circle matrix.
 	uniform float u_segments = 6.0;
 	uniform float u_rotation_speed = 0.2;
-	
 	void fragment() {
 		vec2 uv = UV - 0.5;
 		float r = length(uv);
 		float a = atan(uv.y, uv.x) + (u_time * u_rotation_speed);
 		float angle_step = 2.0 * 3.14159265 / max(u_segments, 1.0);
-		
 		a = mod(a, angle_step);
 		a = abs(a - angle_step * 0.5);
-		
 		vec2 warped_uv = vec2(cos(a), sin(a)) * r + 0.5;
 		warped_uv = clamp(warped_uv, 0.001, 0.999);
-		
 		COLOR = texture(u_pattern_texture, warped_uv);
 	}
 	"""
 	
-	# =========================================================================
-	# PASS 3: ANALOG EDGE GLOW FILTER (CLAUDE FIX INTEGRATED)
-	# =========================================================================
-	var p3_src = """
+	# 2. Store Pass 3 choices (Note: reads u_warped_texture)
+	pass3_library["None Selected"] = """
 	shader_type canvas_item;
-	// CLAUDE FIX: Plain user-defined sampler without screen hint conflicts
+	uniform sampler2D u_warped_texture : filter_linear;
+	void fragment() {
+		COLOR = texture(u_warped_texture, UV);
+	}
+	"""
+	pass3_library["Edge Glow"] = """
+	shader_type canvas_item;
 	uniform sampler2D u_warped_texture : filter_linear;
 	uniform float u_time;
-	
 	// CAT: Glow Intensity
 	// DESC: Structural mathematical edge amplification threshold limits.
 	uniform float u_edge_threshold = 0.15;
 	uniform float u_glow_intensity = 2.5;
 	uniform vec2 u_step_offset = vec2(0.003, 0.003);
-	
 	void fragment() {
 		vec2 uv = UV;
 		vec4 center_color = texture(u_warped_texture, uv);
-		
 		float c  = (center_color.r + center_color.g + center_color.b) / 3.0;
 		float left  = (texture(u_warped_texture, uv - vec2(u_step_offset.x, 0.0)).g);
 		float right = (texture(u_warped_texture, uv + vec2(u_step_offset.x, 0.0)).g);
 		float up    = (texture(u_warped_texture, uv - vec2(0.0, u_step_offset.y)).g);
 		float down  = (texture(u_warped_texture, uv + vec2(0.0, u_step_offset.y)).g);
-		
 		float edge_delta = abs(c - left) + abs(c - right) + abs(c - up) + abs(c - down);
 		float edge_mask = smoothstep(u_edge_threshold, u_edge_threshold + 0.1, edge_delta);
 		vec3 glowing_borders = center_color.rgb * edge_mask * u_glow_intensity;
-		
 		COLOR = vec4(center_color.rgb + glowing_borders, center_color.a);
 	}
 	"""
+	var s1 = Shader.new()
+	s1.code = p1_src
 	
-	var s1 = Shader.new(); s1.code = p1_src
-	var s2 = Shader.new(); s2.code = p2_src
-	var s3 = Shader.new(); s3.code = p3_src
+	var s2 = Shader.new()
+	s2.code = pass2_library["None Selected"] # Compiles raw pass-through on boot
 	
+	var s3 = Shader.new()
+	s3.code = pass3_library["None Selected"] # Compiles raw pass-through on boot
+	
+	# Bind the actual live shader resources directly onto the materials
 	pass1_material.shader = s1
 	pass2_material.shader = s2
 	pass3_material.shader = s3
 	
-	# Apply the user-assigned textures directly to the parameters
+	# Firmly establish the texture processing lines
 	pass2_material.set_shader_parameter("u_pattern_texture", pass1_viewport.get_texture())
 	pass3_material.set_shader_parameter("u_warped_texture", pass2_viewport.get_texture())
 	
+	# Safely stream the text properties into the dynamic control block
 	control_panel.load_shader_source(p1_src)

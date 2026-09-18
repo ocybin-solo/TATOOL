@@ -18,11 +18,20 @@ var is_input_blocked: bool = false
 # Dictionary cache linking variable names directly to their parsed comments
 var uniform_descriptions: Dictionary = {}
 
+var left_upper_dock: PanelContainer
+var right_upper_dock: PanelContainer
+var active_color_picker: ColorPicker
+
 # Node Layout references
 var label_status: Label
 var label_sens_indicator: Label # Your verified thumb indicator label
 var input_row_container: HBoxContainer
 var btn_channel: Button
+
+# Focused Sub-Group states
+var current_active_category: String = ""
+var active_category_uniforms: Array = []
+var relative_category_index: int = 0
 
 func _ready() -> void:
 	setup_ui_layout()
@@ -39,17 +48,31 @@ func setup_ui_layout() -> void:
 	add_child(input_row_container)
 	
 	var btn_size = Vector2(66, 66)
+	var pad_total_width = 66 * 3 # The exact physical width of our D-pad matrix grid
 	
-	# Left wing layout padding (Pushes left D-pad inward for natural thumb placement)
+	# Left wing layout padding
 	var left_spacer = Control.new()
 	left_spacer.custom_minimum_size = Vector2(50, 0)
 	input_row_container.add_child(left_spacer)
 	
-	# --- D-PAD 1 (LEFT THUMB - NAVIGATION) ---
+	# =========================================================================
+	# COLUMN 1: LEFT WING STACK (Upper Dock + Left D-Pad Navigation)
+	# =========================================================================
+	var left_wing_stack = VBoxContainer.new()
+	left_wing_stack.alignment = BoxContainer.ALIGNMENT_END # Flushes layouts flat to bottom
+	input_row_container.add_child(left_wing_stack)
+	
+	# Left upper open real estate slot
+	left_upper_dock = PanelContainer.new()
+	left_upper_dock.custom_minimum_size = Vector2(pad_total_width, 160) # Locked proportional size
+	left_upper_dock.mouse_filter = Control.MOUSE_FILTER_PASS
+	left_upper_dock.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+	left_wing_stack.add_child(left_upper_dock)
+	
 	var nav_grid = GridContainer.new()
 	nav_grid.columns = 3
-	nav_grid.size_flags_vertical = Control.SIZE_SHRINK_CENTER # Perfect vertical centering
-	input_row_container.add_child(nav_grid)
+	nav_grid.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	left_wing_stack.add_child(nav_grid)
 	
 	nav_grid.add_child(Control.new())
 	var btn_p_up = Button.new()
@@ -85,22 +108,35 @@ func setup_ui_layout() -> void:
 	nav_grid.add_child(btn_p_down)
 	nav_grid.add_child(Control.new())
 	
-	# Expanding Central Vault Spacer
+	# Central expanding spacer
 	var middle_expanding_spacer = Control.new()
 	middle_expanding_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	input_row_container.add_child(middle_expanding_spacer)
 	
-	# --- D-PAD 2 (RIGHT THUMB - VALUE MODIFIER) ---
+	# =========================================================================
+	# COLUMN 2: RIGHT WING STACK (Right Upper Dock + Right D-Pad Modifiers)
+	# =========================================================================
+	var right_wing_stack = VBoxContainer.new()
+	right_wing_stack.alignment = BoxContainer.ALIGNMENT_END
+	input_row_container.add_child(right_wing_stack)
+	
+	# Right upper open real estate slot (OUR COLOR TARGET SLOT!)
+	right_upper_dock = PanelContainer.new()
+	right_upper_dock.custom_minimum_size = Vector2(pad_total_width, 160)
+	right_upper_dock.mouse_filter = Control.MOUSE_FILTER_PASS
+	right_upper_dock.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+	right_wing_stack.add_child(right_upper_dock)
+	
 	var val_grid = GridContainer.new()
 	val_grid.columns = 3
-	val_grid.size_flags_vertical = Control.SIZE_SHRINK_CENTER # Perfect vertical centering
-	input_row_container.add_child(val_grid)
+	val_grid.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	right_wing_stack.add_child(val_grid)
 	
 	val_grid.add_child(Control.new())
 	var btn_val_up = Button.new()
 	btn_val_up.text = "VALUE\n▲"
 	btn_val_up.custom_minimum_size = btn_size
-	btn_val_up.pressed.connect(func(): modify_active_value(1.0))
+	btn_val_up.pressed.connect(_on_right_dpad_up)
 	val_grid.add_child(btn_val_up)
 	val_grid.add_child(Control.new())
 	
@@ -125,31 +161,52 @@ func setup_ui_layout() -> void:
 	var btn_val_down = Button.new()
 	btn_val_down.text = "▼\nVALUE"
 	btn_val_down.custom_minimum_size = btn_size
-	btn_val_down.pressed.connect(func(): modify_active_value(-1.0))
+	btn_val_down.pressed.connect(_on_right_dpad_down)
 	val_grid.add_child(btn_val_down)
 	val_grid.add_child(Control.new())
 	
-	# Right wing layout padding (Balances the spacing symmetrically)
+	# Right wing padding spacer
 	var right_spacer = Control.new()
 	right_spacer.custom_minimum_size = Vector2(50, 0)
 	input_row_container.add_child(right_spacer)
+	
+func _on_value_increase_pressed() -> void:
+	modify_active_value(1.0)
+
+func _on_value_decrease_pressed() -> void:
+	modify_active_value(-1.0)
+	
+func _on_right_dpad_up() -> void:
+	var main_manager = get_tree().get_first_node_in_group("main_manager")
+	if main_manager and main_manager.get("is_menu_open"):
+		main_manager.active_menu_index = posmod(main_manager.active_menu_index - 1, main_manager.active_menu_categories.size())
+		main_manager.redraw_fast_travel_menu()
+		return
+	modify_active_value(1.0)
+
+func _on_right_dpad_down() -> void:
+	var main_manager = get_tree().get_first_node_in_group("main_manager")
+	if main_manager and main_manager.get("is_menu_open"):
+		main_manager.active_menu_index = posmod(main_manager.active_menu_index + 1, main_manager.active_menu_categories.size())
+		main_manager.redraw_fast_travel_menu()
+		return
+	modify_active_value(-1.0)
 
 func apply_orientation_layout_shift(_to_portrait: bool, target_top_container: PanelContainer) -> void:
 	if label_status.get_parent():
 		label_status.get_parent().remove_child(label_status)
 	target_top_container.add_child(label_status)
 	update_status_readout()
-
-# Memory String Parser: Walks source strings to capture description tags
+	
 func load_shader_source(shader_code: String) -> void:
 	parsed_uniforms.clear()
 	uniform_values.clear()
 	uniform_descriptions.clear()
-	shader_categories.clear()
+	shader_categories.clear() # Format: {"Category Name": ["u_param1", "u_param2"]}
 	
 	var lines = shader_code.split("\n")
 	var active_cached_desc: String = ""
-	var active_cached_cat: String = ""
+	var active_cached_cat: String = "🌀 GENERAL CONTROLS" # Universal starting bucket
 	
 	for line in lines:
 		var trimmed = line.strip_edges()
@@ -167,52 +224,23 @@ func load_shader_source(shader_code: String) -> void:
 		# 3. Match uniform variables
 		if trimmed.contains("uniform"):
 			var regex = RegEx.new()
-			regex.compile("uniform\\s+(float|vec2|vec4|sampler2D)\\s+(\\w+)")
+			regex.compile("uniform\\s+(float|vec2|vec4)\\s+(\\w+)")
 			var result = regex.search(trimmed)
 			
 			if result:
 				var u_type = result.get_string(1)
 				var u_name = result.get_string(2)
 				
-				if u_name == "u_time" or u_name == "u_pattern_texture" or u_type == "sampler2D": 
+				if u_name == "u_time" or u_name == "u_pattern_texture" or u_name == "u_warped_texture": 
 					continue
 				
-				parsed_uniforms.append({"name": u_name, "type": u_type})
+				var uniform_data = {"name": u_name, "type": u_type}
+				parsed_uniforms.append(uniform_data)
 				
-				# Link first discovered variable to the active category block
-				if active_cached_cat != "":
-					if not shader_categories.has(active_cached_cat):
-						shader_categories[active_cached_cat] = u_name
-					active_cached_cat = "" 
-				else:
-					# 🌀 FALLBACK AUTO-CATEGORIZER REGEX ENGINES
-					var target_cat = "🌀 UTILITY / OTHER"
-					var lower_name = u_name.to_lower()
-					
-					var kw_distortion = ["warp", "twist", "wave", "bend", "scroll", "distort", "zoom", "pinch", "offset"]
-					var kw_chromatic = ["color", "hue", "rgb", "fade", "palette", "tint", "bright", "sat", "contrast", "alpha"]
-					var kw_frequency = ["speed", "freq", "time", "scale", "step", "rate", "pulse", "bpm", "length"]
-					
-					for kw in kw_distortion:
-						if lower_name.contains(kw):
-							target_cat = "🎨 DISTORTION"
-							break
-					
-					if target_cat == "🌀 UTILITY / OTHER":
-						for kw in kw_chromatic:
-							if lower_name.contains(kw):
-								target_cat = "🌈 CHROMATIC"
-								break
-								
-					if target_cat == "🌀 UTILITY / OTHER":
-						for kw in kw_frequency:
-							if lower_name.contains(kw):
-								target_cat = "⚡ FREQUENCY"
-								break
-								
-					# Register fallback category hook safely
-					if not shader_categories.has(target_cat):
-						shader_categories[target_cat] = u_name
+				# Structural categorization grouping arrays mapping loop
+				if not shader_categories.has(active_cached_cat):
+					shader_categories[active_cached_cat] = []
+				shader_categories[active_cached_cat].append(uniform_data)
 				
 				# Link descriptions
 				if active_cached_desc != "":
@@ -221,42 +249,64 @@ func load_shader_source(shader_code: String) -> void:
 				else:
 					uniform_descriptions[u_name] = "Analog variable adjustment channel link."
 				
-				# Populate defaults
-				if u_name == "u_warp_frequency": uniform_values[u_name] = Vector2(2.5, 2.5)
-				elif u_type == "float": uniform_values[u_name] = 1.0
-				elif u_type == "vec2": uniform_values[u_name] = Vector2(5.0, 5.0)
-				elif u_type == "vec4": uniform_values[u_name] = Color.CYAN
-				
-	active_index = 0
-	active_sub_channel = 0
-	update_status_readout()
-	
-func _on_dpad_up() -> void:
-	# 🌟 SECURE GROUP-BASED NAVIGATION
-	var main_manager = get_tree().get_first_node_in_group("main_manager")
+				# Populate default fallbacks safely
+				if u_type == "float" and not uniform_values.has(u_name): uniform_values[u_name] = 1.0
+				elif u_type == "vec2" and not uniform_values.has(u_name): uniform_values[u_name] = Vector2(1.0, 1.0)
+				elif u_type == "vec4" and not uniform_values.has(u_name): uniform_values[u_name] = Color.CYAN
 
+			# Fallback safety if no explicit tags exist
+			if shader_categories.is_empty() and not parsed_uniforms.is_empty():
+				shader_categories["🌀 GENERAL CONTROLS"] = parsed_uniforms.duplicate()
+				
+			active_index = 0
+			active_sub_channel = 0
+			update_status_readout()
+			
+func _on_dpad_up() -> void:
+	var main_manager = get_tree().get_first_node_in_group("main_manager")
 	if main_manager and main_manager.get("is_menu_open"):
 		main_manager.active_menu_index = posmod(main_manager.active_menu_index - 1, main_manager.active_menu_categories.size())
 		main_manager.redraw_fast_travel_menu()
 		return
 
-	if parsed_uniforms.is_empty(): return
-	active_index = posmod(active_index - 1, parsed_uniforms.size())
+	# Confine parameter index loops entirely within the active module selection
+	var target_list = active_category_uniforms if not active_category_uniforms.is_empty() else parsed_uniforms
+	if target_list.is_empty(): return
+	
+	relative_category_index = posmod(relative_category_index - 1, target_list.size())
+	
+	# Remap the local relative pointer index back to the global index position
+	var chosen_uniform_name = target_list[relative_category_index]["name"]
+	for idx in range(parsed_uniforms.size()):
+		if parsed_uniforms[idx]["name"] == chosen_uniform_name:
+			active_index = idx
+			break
+			
 	active_sub_channel = 0
 	update_status_readout()
 
-func _on_dpad_down() -> void:
-	# 🌟 SECURE GROUP-BASED NAVIGATION
-	var main_manager = get_tree().get_first_node_in_group("main_manager")
 
+func _on_dpad_down() -> void:
+	var main_manager = get_tree().get_first_node_in_group("main_manager")
 	if main_manager and main_manager.get("is_menu_open"):
 		main_manager.active_menu_index = posmod(main_manager.active_menu_index + 1, main_manager.active_menu_categories.size())
 		main_manager.redraw_fast_travel_menu()
 		return
 
-	if parsed_uniforms.is_empty(): return
-	active_index = posmod(active_index + 1, parsed_uniforms.size())
-	active_sub_channel = 0 
+	# Confine parameter index loops entirely within the active module selection
+	var target_list = active_category_uniforms if not active_category_uniforms.is_empty() else parsed_uniforms
+	if target_list.is_empty(): return
+	
+	relative_category_index = posmod(relative_category_index + 1, target_list.size())
+	
+	# Remap the local relative pointer index back to the global index position
+	var chosen_uniform_name = target_list[relative_category_index]["name"]
+	for idx in range(parsed_uniforms.size()):
+		if parsed_uniforms[idx]["name"] == chosen_uniform_name:
+			active_index = idx
+			break
+			
+	active_sub_channel = 0
 	update_status_readout()
 
 func _on_dpad_left() -> void:
@@ -350,3 +400,32 @@ func update_status_readout() -> void:
 	
 	if label_sens_indicator:
 		label_sens_indicator.text = sens_str
+
+	# ==================== PASTE THE LIFECYCLE BLOCK HERE ====================
+	if active["type"] == "vec4":
+		if not active_color_picker:
+			active_color_picker = ColorPicker.new()
+			
+			active_color_picker.picker_shape = ColorPicker.SHAPE_HSV_WHEEL
+			active_color_picker.color_modes_visible = false
+			active_color_picker.sampler_visible = false
+			active_color_picker.sliders_visible = false
+			active_color_picker.presets_visible = false
+			active_color_picker.hex_visible = false
+			
+			active_color_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			active_color_picker.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+			
+			if uniform_values.has(p_name):
+				active_color_picker.color = uniform_values[p_name]
+				
+			active_color_picker.color_changed.connect(func(new_color: Color):
+				uniform_values[p_name] = new_color
+				uniform_changed.emit(p_name, new_color)
+			)
+			
+			right_upper_dock.add_child(active_color_picker)
+	else:
+		if active_color_picker:
+			active_color_picker.queue_free()
+			active_color_picker = null
