@@ -120,6 +120,7 @@ func setup_dual_pass_pipeline() -> void:
 	canvas_stack.mouse_filter = Control.MOUSE_FILTER_PASS
 	upper_display_area.add_child(canvas_stack)
 	
+	# CRITICAL CONTAINER TRANSPARENCY: Allow alpha data to clip through to the app UI chassis
 	canvas_container = SubViewportContainer.new()
 	canvas_container.stretch = true
 	canvas_container.custom_minimum_size = current_preset.target_resolution
@@ -132,11 +133,14 @@ func setup_dual_pass_pipeline() -> void:
 	label_safety_alert.add_theme_font_size_override("font_size", 14)
 	canvas_stack.add_child(label_safety_alert)
 	
-	# --- PASS 1: GENERATIVE MATH BUFFER ---
+	# =========================================================================
+	# PASS 1: GENERATIVE MATH BUFFER (TRANSPARENT)
+	# =========================================================================
 	pass1_viewport = SubViewport.new()
 	pass1_viewport.size = current_preset.target_resolution
 	pass1_viewport.disable_3d = true
-	pass1_viewport.transparent_bg = false
+	# THE FIX: Force native alpha channel buffer allocation on the GPU
+	pass1_viewport.transparent_bg = true
 	pass1_viewport.render_target_clear_mode = SubViewport.CLEAR_MODE_ALWAYS
 	pass1_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	add_child(pass1_viewport)
@@ -149,11 +153,14 @@ func setup_dual_pass_pipeline() -> void:
 	pass1_material = ShaderMaterial.new()
 	pass1_rect.material = pass1_material
 	
-	# --- PASS 2: GEOMETRIC WARPING BUFFER ---
+	# =========================================================================
+	# PASS 2: GEOMETRIC WARPING BUFFER (TRANSPARENT)
+	# =========================================================================
 	pass2_viewport = SubViewport.new()
 	pass2_viewport.size = current_preset.target_resolution
 	pass2_viewport.disable_3d = true
-	pass2_viewport.transparent_bg = false
+	# THE FIX: Force native alpha channel buffer allocation on the GPU
+	pass2_viewport.transparent_bg = true
 	pass2_viewport.render_target_clear_mode = SubViewport.CLEAR_MODE_ALWAYS
 	pass2_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	add_child(pass2_viewport) 
@@ -166,11 +173,14 @@ func setup_dual_pass_pipeline() -> void:
 	pass2_material = ShaderMaterial.new()
 	pass2_rect.material = pass2_material
 	
-	# --- PASS 3: POST-PROCESS FILTER BUFFER (VISIBLE SCREEN) ---
+	# =========================================================================
+	# PASS 3: POST-PROCESS FILTER BUFFER (VISIBLE & TRANSPARENT)
+	# =========================================================================
 	pass3_viewport = SubViewport.new()
 	pass3_viewport.size = current_preset.target_resolution
 	pass3_viewport.disable_3d = true
-	pass3_viewport.transparent_bg = false
+	# THE FIX: Force native alpha channel buffer allocation on the GPU
+	pass3_viewport.transparent_bg = true
 	pass3_viewport.render_target_clear_mode = SubViewport.CLEAR_MODE_ALWAYS
 	pass3_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	canvas_container.add_child(pass3_viewport)
@@ -183,9 +193,10 @@ func setup_dual_pass_pipeline() -> void:
 	pass3_material = ShaderMaterial.new()
 	pass3_rect.material = pass3_material
 	
-	# Establish the explicit texture pipeline bindings
+	# Establish the explicit texture pipeline bindings across the transparent passes
 	pass2_material.set_shader_parameter("u_pattern_texture", pass1_viewport.get_texture())
 	pass3_material.set_shader_parameter("u_warped_texture", pass2_viewport.get_texture())
+
 
 func setup_interface_layer() -> void:
 	var ui_layer = CanvasLayer.new()
@@ -598,30 +609,41 @@ func _process_live_automation(delta: float) -> void:
 		
 	control_panel.update_status_readout()
 
-
 func load_default_test_shaders() -> void:
 	# =========================================================================
-	# PASS 1 LIBRARY MODULES (RESTORING PATTERN 1 + UPGRADING VORONOI BACKGROUNDS)
+	# PASS 1 LIBRARY MODULES (INTEGRATED BRIGHTNESS, CONTRAST, AND GAMMA MATRICES)
 	# =========================================================================
 	var p1_domain_warp = """
 	shader_type canvas_item;
 	uniform float u_time;
+	
 	// CAT: Matrix Adjustments
 	// DESC: Rotates the underlying space calculation grid.
 	uniform float u_matrix_rotate = 0.0;
-	// DESC: Distorts and stretches the coordinate aspect scale.
 	uniform vec2 u_space_scale = vec2(1.0, 1.0);
+	
 	// CAT: Warping Calculations
 	// DESC: Dictates how hard the internal noise loops twist into each other.
 	uniform float u_warp_twist = 0.5;
 	uniform float u_warp_strength = 1.1;
 	uniform float u_noise_detail = 4.0;
 	uniform float u_flow_speed = 0.4;
-	// CAT: Aesthetics & Tinting
+	
+	// CAT: Aesthetics & Finishing
 	// DESC: Main coloring vector array layer target tint.
 	uniform vec4 u_pattern_color : source_color = vec4(0.1, 0.7, 0.9, 1.0);
-	// DESC: Secondary custom background filler color space vector.
-	uniform vec4 u_background_color : source_color = vec4(0.02, 0.02, 0.05, 1.0);
+	
+	// DESC: Global scalar adjustment factor for overall visual luminance.
+	uniform float u_brightness = 1.0;
+	
+	// DESC: Linear contrast multiplier expanding dark/light value spreads.
+	uniform float u_contrast = 1.0;
+	
+	// DESC: Midtone power-curve correction factor for organic blending.
+	uniform float u_gamma = 1.0;
+	
+	// DESC: Hard threshold multiplier for global opacity tracking values.
+	uniform float u_alpha_scale = 1.0;
 	
 	float hash2d(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
 	float value_noise(vec2 p) {
@@ -651,8 +673,21 @@ func load_default_test_shaders() -> void:
 		vec2 q = vec2(fbm(st + vec2(scaled_time * 0.2)), fbm(st + vec2(5.2, 1.3) + vec2(scaled_time * 0.15)));
 		vec2 r = vec2(fbm(st + u_warp_strength * (twist_mat * q) + vec2(1.7, 9.2) + vec2(scaled_time * 0.3)), fbm(st + u_warp_strength * (twist_mat * q) + vec2(8.3, 2.8) + vec2(scaled_time * 0.05)));
 		float final_field_math = fbm(st + u_warp_strength * r);
-		vec4 dynamic_bg = mix(u_background_color, vec4(0.12, 0.0, 0.22, 1.0), clamp(length(q), 0.0, 1.0));
-		COLOR = mix(dynamic_bg, u_pattern_color, final_field_math) * (final_field_math * 1.5 + 0.3);
+		
+		// 1. Calculate foundational procedural RGB and alpha weights
+		vec3 base_rgb = u_pattern_color.rgb * (final_field_math * 1.5 + 0.3);
+		float base_alpha = final_field_math * u_pattern_color.a * u_alpha_scale;
+		
+		// 2. Core Post-Process Math Calculations: Brightness
+		base_rgb *= u_brightness;
+		
+		// 3. Contrast: Shift values around a centered 0.5 midtone anchor point safely
+		base_rgb = (base_rgb - 0.5) * u_contrast + 0.5;
+		
+		// 4. Gamma Correction: Apply exponential power curving rules cleanly
+		base_rgb = max(pow(max(base_rgb, vec3(0.0)), vec3(1.0 / max(u_gamma, 0.01))), vec3(0.0));
+		
+		COLOR = vec4(base_rgb, base_alpha);
 	}
 	"""
 	
@@ -660,22 +695,26 @@ func load_default_test_shaders() -> void:
 	pass1_library["Voronoi Cells"] = """
 	shader_type canvas_item;
 	uniform float u_time;
+	
 	// CAT: Cellular Structure
 	// DESC: Multiplier factor for the total grid density scaling partition size.
 	uniform float u_cell_scale = 4.0;
-	// DESC: Morph limits between rigid square grids (0.0) and chaotic organic layouts (1.0).
 	uniform float u_cell_mutation = 1.0;
-	// CAT: Organic Fluidity
-	// DESC: Radial orbit tracking velocity multiplier for individual inner nuclei points.
 	uniform float u_nuclei_speed = 0.8;
+	
 	// CAT: Edge Cosmetics
 	// DESC: Sharpness contrast filter applied to the border gradient fields.
 	uniform float u_border_sharpness = 2.0;
-	// CAT: Aesthetics & Tinting
+	// DESC: Blur smoothing roll-off factor applied to outer cellular margins.
+	uniform float u_edge_softness = 0.05;
+	
+	// CAT: Aesthetics & Finishing
 	// DESC: Main coloring vector array layer target tint.
 	uniform vec4 u_pattern_color : source_color = vec4(0.1, 0.7, 0.9, 1.0);
-	// DESC: Customizable color picker target slot for negative cell space voids.
-	uniform vec4 u_background_color : source_color = vec4(0.02, 0.02, 0.06, 1.0);
+	uniform float u_brightness = 1.0;
+	uniform float u_contrast = 1.0;
+	uniform float u_gamma = 1.0;
+	uniform float u_alpha_scale = 1.0;
 	
 	vec2 random2(vec2 p) {
 		return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))) * 43758.5453);
@@ -696,9 +735,20 @@ func load_default_test_shaders() -> void:
 				m_dist = min(m_dist, dist);
 			}
 		}
-		float cell_vibrancy = 1.0 - m_dist;
+		
+		// Utilize smoothstepping across edge margins to control vector falloff clipping maps
+		float cell_vibrancy = smoothstep(u_edge_softness, u_edge_softness + 0.5, 1.0 - m_dist);
 		cell_vibrancy = pow(cell_vibrancy, u_border_sharpness);
-		COLOR = mix(u_background_color, u_pattern_color, cell_vibrancy);
+		
+		vec3 base_rgb = u_pattern_color.rgb;
+		float base_alpha = cell_vibrancy * u_pattern_color.a * u_alpha_scale;
+		
+		// Execute aesthetic post-processing matrices
+		base_rgb *= u_brightness;
+		base_rgb = (base_rgb - 0.5) * u_contrast + 0.5;
+		base_rgb = max(pow(max(base_rgb, vec3(0.0)), vec3(1.0 / max(u_gamma, 0.01))), vec3(0.0));
+		
+		COLOR = vec4(base_rgb, base_alpha);
 	}
 	"""
 	
@@ -758,15 +808,10 @@ func load_default_test_shaders() -> void:
 	}
 	"""
 
-	# =========================================================================
-	# COMPILE DEFAULT OBJECTS AND BOOT UP CLEAR SLATE
-	# =========================================================================
 	var s1 = Shader.new()
 	s1.code = pass1_library["Domain Warp"]
-	
 	var s2 = Shader.new()
 	s2.code = pass2_library["None Selected"]
-	
 	var s3 = Shader.new()
 	s3.code = pass3_library["None Selected"]
 	
@@ -778,6 +823,7 @@ func load_default_test_shaders() -> void:
 	pass3_material.set_shader_parameter("u_warped_texture", pass2_viewport.get_texture())
 	
 	control_panel.load_shader_source(s1.code)
+
 
 func _on_global_factory_reset_pressed() -> void:
 	if not control_panel or control_panel.parsed_uniforms.is_empty(): return
