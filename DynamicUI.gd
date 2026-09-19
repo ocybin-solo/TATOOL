@@ -13,7 +13,7 @@ var sensitivity_presets: Array = [0.01, 0.1, 1.0, 5.0, 10.0]
 var current_sens_index: int = 2
 var active_sub_channel: int = 0
 var uniform_values: Dictionary = {}
-var is_input_blocked: bool = false
+#var is_input_blocked: bool = false
 
 # 🌟 STRICT INPUT ISOLATION: while a menu overlay is open, MainManager
 # calls set_dpad_locked(true) and both physical D-pad clusters go
@@ -65,21 +65,21 @@ func setup_ui_layout() -> void:
 	# --- D-PAD 1 (LEFT THUMB - NAVIGATION) ---
 	var nav_grid = GridContainer.new()
 	nav_grid.columns = 3
-	nav_grid.size_flags_vertical = Control.SIZE_SHRINK_CENTER # Perfect vertical centering
+	nav_grid.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	input_row_container.add_child(nav_grid)
 	
 	nav_grid.add_child(Control.new())
 	btn_param_up = Button.new()
 	btn_param_up.text = "PARAM\n▲"
 	btn_param_up.custom_minimum_size = btn_size
-	btn_param_up.pressed.connect(_on_dpad_up)
+	btn_param_up.pressed.connect(_on_left_dpad_up)
 	nav_grid.add_child(btn_param_up)
 	nav_grid.add_child(Control.new())
 	
 	btn_channel_prev = Button.new()
 	btn_channel_prev.text = "◄\nCH"
 	btn_channel_prev.custom_minimum_size = btn_size
-	btn_channel_prev.pressed.connect(_on_channel_back)
+	btn_channel_prev.pressed.connect(_on_left_dpad_left)
 	nav_grid.add_child(btn_channel_prev)
 	
 	btn_channel = Button.new()
@@ -91,14 +91,14 @@ func setup_ui_layout() -> void:
 	btn_channel_next = Button.new()
 	btn_channel_next.text = "CH\n►"
 	btn_channel_next.custom_minimum_size = btn_size
-	btn_channel_next.pressed.connect(_on_channel_toggle_pressed)
+	btn_channel_next.pressed.connect(_on_left_dpad_right)
 	nav_grid.add_child(btn_channel_next)
 	
 	nav_grid.add_child(Control.new())
 	btn_param_down = Button.new()
 	btn_param_down.text = "▼\nPARAM"
 	btn_param_down.custom_minimum_size = btn_size
-	btn_param_down.pressed.connect(_on_dpad_down)
+	btn_param_down.pressed.connect(_on_left_dpad_down)
 	nav_grid.add_child(btn_param_down)
 	nav_grid.add_child(Control.new())
 	
@@ -110,21 +110,21 @@ func setup_ui_layout() -> void:
 	# --- D-PAD 2 (RIGHT THUMB - VALUE MODIFIER) ---
 	var val_grid = GridContainer.new()
 	val_grid.columns = 3
-	val_grid.size_flags_vertical = Control.SIZE_SHRINK_CENTER # Perfect vertical centering
+	val_grid.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	input_row_container.add_child(val_grid)
 	
 	val_grid.add_child(Control.new())
 	btn_value_up = Button.new()
 	btn_value_up.text = "VALUE\n▲"
 	btn_value_up.custom_minimum_size = btn_size
-	btn_value_up.pressed.connect(func(): modify_active_value(1.0))
+	btn_value_up.pressed.connect(_on_right_dpad_up)
 	val_grid.add_child(btn_value_up)
 	val_grid.add_child(Control.new())
 	
 	btn_sens_left = Button.new()
 	btn_sens_left.text = "◄\nSENS"
 	btn_sens_left.custom_minimum_size = btn_size
-	btn_sens_left.pressed.connect(_on_dpad_left)
+	btn_sens_left.pressed.connect(_on_right_dpad_left)
 	val_grid.add_child(btn_sens_left)
 	
 	label_sens_indicator = Label.new()
@@ -135,14 +135,14 @@ func setup_ui_layout() -> void:
 	btn_sens_right = Button.new()
 	btn_sens_right.text = "SENS\n►"
 	btn_sens_right.custom_minimum_size = btn_size
-	btn_sens_right.pressed.connect(_on_dpad_right)
+	btn_sens_right.pressed.connect(_on_right_dpad_right)
 	val_grid.add_child(btn_sens_right)
 	
 	val_grid.add_child(Control.new())
 	btn_value_down = Button.new()
 	btn_value_down.text = "▼\nVALUE"
 	btn_value_down.custom_minimum_size = btn_size
-	btn_value_down.pressed.connect(func(): modify_active_value(-1.0))
+	btn_value_down.pressed.connect(_on_right_dpad_down)
 	val_grid.add_child(btn_value_down)
 	val_grid.add_child(Control.new())
 	
@@ -248,33 +248,125 @@ func load_shader_source(shader_code: String) -> void:
 	active_sub_channel = 0
 	update_status_readout()
 	
-func set_dpad_locked(is_locked: bool) -> void:
-	# Strict Input Isolation: flip every physical D-pad button inert
-	# the instant a menu overlay opens. Menu nav from here on is
-	# driven only by the overlay's own ▲/▼ buttons.
-	for btn in [btn_param_up, btn_param_down, btn_channel_prev, btn_channel_next,
-			btn_value_up, btn_value_down, btn_sens_left, btn_sens_right]:
-		if btn:
-			btn.disabled = is_locked
-
-func _on_dpad_up() -> void:
+#func set_dpad_locked(is_locked: bool) -> void:
+	## Strict Input Isolation: flip every physical D-pad button inert ## 
+	## the instant a menu overlay opens. Menu nav from here on is
+	## driven only by the overlay's own ▲/▼ buttons.
+	#for btn in [btn_param_up, btn_param_down, btn_channel_prev, btn_channel_next,
+			#btn_value_up, btn_value_down, btn_sens_left, btn_sens_right]:
+		#if btn:
+			#btn.disabled = is_locked
+func _on_left_dpad_up() -> void:
+	var main_manager = get_tree().get_first_node_in_group("main_manager")
+	if main_manager and main_manager.is_menu_open:
+		if main_manager.active_menu_kind == main_manager.MenuKind.SELECT_PASS:
+			main_manager._step_select_pass_highlight(-1)
+		elif main_manager.active_menu_kind == main_manager.MenuKind.SHADER_MENU:
+			main_manager._step_fast_travel_selection(-1)
+		return
+		
 	if parsed_uniforms.is_empty(): return
 	active_index = posmod(active_index - 1, parsed_uniforms.size())
 	active_sub_channel = 0
 	update_status_readout()
 
-func _on_dpad_down() -> void:
+func _on_left_dpad_down() -> void:
+	var main_manager = get_tree().get_first_node_in_group("main_manager")
+	if main_manager and main_manager.is_menu_open:
+		if main_manager.active_menu_kind == main_manager.MenuKind.SELECT_PASS:
+			main_manager._step_select_pass_highlight(1)
+		elif main_manager.active_menu_kind == main_manager.MenuKind.SHADER_MENU:
+			main_manager._step_fast_travel_selection(1)
+		return
+		
 	if parsed_uniforms.is_empty(): return
 	active_index = posmod(active_index + 1, parsed_uniforms.size())
 	active_sub_channel = 0 
 	update_status_readout()
 
-func _on_dpad_left() -> void:
+func _on_left_dpad_left() -> void:
+	var main_manager = get_tree().get_first_node_in_group("main_manager")
+	if main_manager and main_manager.is_menu_open:
+		if main_manager.active_menu_kind == main_manager.MenuKind.SELECT_PASS:
+			main_manager.close_select_pass_menu(false)
+		elif main_manager.active_menu_kind == main_manager.MenuKind.SHADER_MENU:
+			main_manager.close_fast_travel_menu()
+		refresh_menu_context_labels(false)
+		return
+		
 	current_sens_index = max(0, current_sens_index - 1)
 	sensitivity = sensitivity_presets[current_sens_index]
 	update_status_readout()
 
-func _on_dpad_right() -> void:
+func _on_left_dpad_right() -> void:
+	var main_manager = get_tree().get_first_node_in_group("main_manager")
+	if main_manager and main_manager.is_menu_open:
+		if main_manager.active_menu_kind == main_manager.MenuKind.SELECT_PASS:
+			main_manager.close_select_pass_menu(true)
+			main_manager.open_select_pass_menu()
+		elif main_manager.active_menu_kind == main_manager.MenuKind.SHADER_MENU:
+			var old_index = main_manager.active_menu_index
+			main_manager.close_fast_travel_menu()
+			main_manager.open_fast_travel_menu()
+			main_manager.active_menu_index = old_index
+			main_manager.redraw_fast_travel_menu()
+		refresh_menu_context_labels(true)
+		return
+		
+	current_sens_index = min(sensitivity_presets.size() - 1, current_sens_index + 1)
+	sensitivity = sensitivity_presets[current_sens_index]
+	update_status_readout()
+
+func _on_right_dpad_up() -> void:
+	var main_manager = get_tree().get_first_node_in_group("main_manager")
+	if main_manager and main_manager.is_menu_open:
+		_on_left_dpad_up()
+		return
+	modify_active_value(1.0)
+
+func _on_right_dpad_down() -> void:
+	var main_manager = get_tree().get_first_node_in_group("main_manager")
+	if main_manager and main_manager.is_menu_open:
+		_on_left_dpad_down()
+		return
+	modify_active_value(-1.0)
+
+func _on_right_dpad_left() -> void:
+	var main_manager = get_tree().get_first_node_in_group("main_manager")
+	if main_manager and main_manager.is_menu_open:
+		if main_manager.active_menu_kind == main_manager.MenuKind.SELECT_PASS:
+			main_manager.close_select_pass_menu(true)
+			main_manager.open_select_pass_menu()
+		elif main_manager.active_menu_kind == main_manager.MenuKind.SHADER_MENU:
+			var old_index = main_manager.active_menu_index
+			main_manager.close_fast_travel_menu()
+			main_manager.open_fast_travel_menu()
+			main_manager.active_menu_index = old_index
+			main_manager.redraw_fast_travel_menu()
+		refresh_menu_context_labels(true)
+		return
+	_on_left_dpad_left()
+
+func _on_right_dpad_right() -> void:
+	var main_manager = get_tree().get_first_node_in_group("main_manager")
+	if main_manager and main_manager.is_menu_open:
+		if main_manager.active_menu_kind == main_manager.MenuKind.SELECT_PASS:
+			main_manager.close_select_pass_menu(false)
+		elif main_manager.active_menu_kind == main_manager.MenuKind.SHADER_MENU:
+			main_manager.close_fast_travel_menu()
+		refresh_menu_context_labels(false)
+		return
+	_on_left_dpad_right()
+		
+	current_sens_index = min(sensitivity_presets.size() - 1, current_sens_index + 1)
+	sensitivity = sensitivity_presets[current_sens_index]
+	update_status_readout()
+		
+	current_sens_index = min(sensitivity_presets.size() - 1, current_sens_index + 1)
+	sensitivity = sensitivity_presets[current_sens_index]
+	update_status_readout()
+		
+	# Regular Mode: Raise sensitivity steps
 	current_sens_index = min(sensitivity_presets.size() - 1, current_sens_index + 1)
 	sensitivity = sensitivity_presets[current_sens_index]
 	update_status_readout()
@@ -296,8 +388,7 @@ func _on_channel_back() -> void:
 	update_status_readout()
 
 func modify_active_value(direction_multiplier: float) -> void:
-	# 🌟 SAFETY VALVE GUARD LINE
-	if is_input_blocked: return
+
 
 	# The rest of your existing modify_active_value function remains the same:
 	if parsed_uniforms.is_empty(): return
@@ -361,3 +452,17 @@ func update_status_readout() -> void:
 	
 	if label_sens_indicator:
 		label_sens_indicator.text = sens_str
+		
+func refresh_menu_context_labels(menu_is_active: bool) -> void:
+	if menu_is_active:
+		# 🪞 Mirrored Layout Labels active while any overlay sits open
+		btn_channel_prev.text = "❌\nEXIT"
+		btn_channel_next.text = "✔\nACCEPT"
+		btn_sens_left.text = "✔\nACCEPT"
+		btn_sens_right.text = "❌\nEXIT"
+	else:
+		# Restore standard idle hardware dashboard labels when menus close
+		btn_channel_prev.text = "◄\nCH"
+		btn_channel_next.text = "CH\n►"
+		btn_sens_left.text = "◄\nSENS"
+		btn_sens_right.text = "SENS\n►"

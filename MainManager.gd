@@ -36,7 +36,6 @@ var btn_shader_menu: Button
 var btn_screensaver_stub: Button
 const LABEL_SELECT_PASS_IDLE: String = "🔄 SELECT PASS"
 const LABEL_SHADER_MENU_IDLE: String = "🕹️ SHADER MENU"
-const LABEL_MENU_ACTIVE: String = "SELECT & CLOSE MENU"
 
 # --- ONBOARDING BOOT RIBBON ---
 # The actual suppress/release flag lives on control_panel
@@ -185,18 +184,14 @@ func setup_interface_layer() -> void:
 	ui_canvas_layer.layer = 1
 	add_child(ui_canvas_layer)
 
-	# 🌟 UNAMBIGUOUS TOP-MOST UI LAYERING
-	# Menus live on their own CanvasLayer, one step above the main
-	# interface, so they can never end up hidden behind a viewport or
-	# blocked from receiving touch input.
-	menu_canvas_layer = CanvasLayer.new()
-	menu_canvas_layer.layer = 2
-	add_child(menu_canvas_layer)
-
 	menu_center_host = CenterContainer.new()
 	menu_center_host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	menu_center_host.mouse_filter = Control.MOUSE_FILTER_PASS
-	menu_canvas_layer.add_child(menu_center_host)
+	menu_center_host.visible = false
+	
+	# 🌟 THE NEW LAYER 1 PLANE + ELEVATED DRAW DEPTH
+	menu_center_host.z_index = 2 
+	ui_canvas_layer.add_child(menu_center_host)
 
 	main_layout = VBoxContainer.new()
 	main_layout.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -234,6 +229,9 @@ func setup_interface_layer() -> void:
 	main_layout.add_child(control_panel)
 	control_panel.uniform_changed.connect(_on_ui_uniform_modified)
 	
+	control_panel.mouse_filter=Control.MOUSE_FILTER_IGNORE
+	
+	
 	# =========================================================================
 	# 🕹️ UNIFIED THREE-BUTTON HARDWARE CLUSTER ROW
 	# =========================================================================
@@ -259,7 +257,7 @@ func setup_interface_layer() -> void:
 	btn_screensaver_stub.visible = false
 	btn_screensaver_stub.focus_mode = Control.FOCUS_NONE
 	btn_screensaver_stub.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	btn_screensaver_stub.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn_screensaver_stub.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	bottom_toolbar.add_child(btn_screensaver_stub)
 
 	# 3. SHADER MENU (Right Side of Group) — the existing fast-travel
@@ -280,19 +278,20 @@ func setup_interface_layer() -> void:
 # pass and closing the menu is what actually updates active_shader_layer.
 # ------------------------------------------------------------------
 func _on_select_pass_button_pressed() -> void:
+	print("🎯 DIAGNOSTIC: Bottom Bar 'Select Pass' Button was physically ")
 	if active_menu_kind == MenuKind.SELECT_PASS:
 		close_select_pass_menu(true)
 		return
 	if active_menu_kind == MenuKind.SHADER_MENU:
 		close_fast_travel_menu()
 	open_select_pass_menu()
-
 func open_select_pass_menu() -> void:
 	is_menu_open = true
 	active_menu_kind = MenuKind.SELECT_PASS
-	btn_select_pass.text = LABEL_MENU_ACTIVE
+
 	select_pass_pending_index = active_shader_layer
 
+	menu_center_host.visible = true
 	select_pass_overlay_panel = PanelContainer.new()
 	select_pass_overlay_panel.custom_minimum_size = Vector2(340, 220)
 	var style = StyleBoxFlat.new()
@@ -311,25 +310,9 @@ func open_select_pass_menu() -> void:
 	select_pass_list_box.alignment = BoxContainer.ALIGNMENT_CENTER
 	panel_body.add_child(select_pass_list_box)
 
-	# 🌟 DEDICATED MENU NAVIGATION CONTROLS (physical D-pads are locked below)
-	var nav_row = HBoxContainer.new()
-	nav_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	panel_body.add_child(nav_row)
-
-	var btn_nav_up = Button.new()
-	btn_nav_up.text = "▲"
-	btn_nav_up.custom_minimum_size = Vector2(60, 44)
-	btn_nav_up.pressed.connect(func(): _step_select_pass_highlight(-1))
-	nav_row.add_child(btn_nav_up)
-
-	var btn_nav_down = Button.new()
-	btn_nav_down.text = "▼"
-	btn_nav_down.custom_minimum_size = Vector2(60, 44)
-	btn_nav_down.pressed.connect(func(): _step_select_pass_highlight(1))
-	nav_row.add_child(btn_nav_down)
-
-	control_panel.is_input_blocked = true
-	control_panel.set_dpad_locked(true)
+	# 🌟 FORCE UNLOCKED: Ensure physical D-pads can drive menu navigation strings
+	#control_panel.is_input_blocked = false
+	#control_panel.set_dpad_locked(false)
 	redraw_select_pass_menu()
 
 func _step_select_pass_highlight(direction: int) -> void:
@@ -355,52 +338,38 @@ func redraw_select_pass_menu() -> void:
 			lbl.text = "    %s    " % PASS_LABELS[i]
 			lbl.add_theme_color_override("font_color", Color.DARK_GRAY)
 		select_pass_list_box.add_child(lbl)
-
 func close_select_pass_menu(confirm: bool) -> void:
 	if confirm:
-		# Cycle focus onto whichever pass was highlighted (0 -> 1 -> 2)
 		active_shader_layer = select_pass_pending_index
-
-		# Reset the UI pointer safely before loading new parameter variables
 		control_panel.active_index = 0
 		control_panel.active_sub_channel = 0
 
 		var active_mat: ShaderMaterial = null
 		match active_shader_layer:
-			0:
-				print("Console Focus: [PASS 1 - GENERATIVE MATH]")
-				active_mat = pass1_material
-			1:
-				print("Console Focus: [PASS 2 - GEOMETRIC WARPING]")
-				active_mat = pass2_material
-			2:
-				print("Console Focus: [PASS 3 - POST-PROCESS FILTERS]")
-				active_mat = pass3_material
+			0: active_mat = pass1_material
+			1: active_mat = pass2_material
+			2: active_mat = pass3_material
 
-		# Securely ingest the active shader parameters into the DynamicUI control block
 		if active_mat and active_mat.shader:
 			control_panel.load_shader_source(active_mat.shader.code)
-
-			# Synchronize live runtime parameters back into the UI cache values
 			for u_name in control_panel.uniform_values:
 				var val = active_mat.get_shader_parameter(u_name)
 				if val != null:
 					control_panel.uniform_values[u_name] = val
 		else:
-			# Safety guard if a shader pass is temporarily empty or uncompiled
 			control_panel.parsed_uniforms.clear()
 			control_panel.uniform_values.clear()
-			print("⚠️ Warning: Focused layer material or shader is unassigned.")
 
-	control_panel.is_input_blocked = false
-	control_panel.set_dpad_locked(false)
+	#control_panel.is_input_blocked = false
+	#control_panel.set_dpad_locked(false)
 	control_panel.update_status_readout()
 
 	is_menu_open = false
 	active_menu_kind = MenuKind.NONE
 	btn_select_pass.text = LABEL_SELECT_PASS_IDLE
+	menu_center_host.visible = false
 
-	if select_pass_overlay_panel:
+	if select_pass_overlay_panel and is_instance_valid(select_pass_overlay_panel):
 		select_pass_overlay_panel.queue_free()
 		select_pass_overlay_panel = null
 
@@ -417,9 +386,7 @@ func _on_shader_menu_button_pressed() -> void:
 	if active_menu_kind == MenuKind.SELECT_PASS:
 		close_select_pass_menu(false)
 	open_fast_travel_menu()
-
 func open_fast_travel_menu() -> void:
-	# Force the UI to refresh its category dictionary based on the currently active layer code
 	var active_mat: ShaderMaterial = null
 	match active_shader_layer:
 		0: active_mat = pass1_material
@@ -430,15 +397,16 @@ func open_fast_travel_menu() -> void:
 		control_panel.load_shader_source(active_mat.shader.code)
 
 	active_menu_categories = control_panel.shader_categories.keys()
-	if active_menu_categories.is_empty():
-		control_panel.is_input_blocked = false
-		return
+	#if active_menu_categories.is_empty():
+		#control_panel.is_input_blocked = false
+		#return
 	active_menu_index = 0
 
 	is_menu_open = true
 	active_menu_kind = MenuKind.SHADER_MENU
-	btn_shader_menu.text = LABEL_MENU_ACTIVE
 
+
+	menu_center_host.visible = true
 	menu_overlay_panel = PanelContainer.new()
 	menu_overlay_panel.custom_minimum_size = Vector2(340, 260)
 	var style = StyleBoxFlat.new()
@@ -457,26 +425,9 @@ func open_fast_travel_menu() -> void:
 	menu_list_box.alignment = BoxContainer.ALIGNMENT_CENTER
 	panel_body.add_child(menu_list_box)
 
-	# 🌟 DEDICATED MENU NAVIGATION CONTROLS (physical D-pads are locked below)
-	var nav_row = HBoxContainer.new()
-	nav_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	panel_body.add_child(nav_row)
-
-	var btn_nav_up = Button.new()
-	btn_nav_up.text = "▲"
-	btn_nav_up.custom_minimum_size = Vector2(60, 44)
-	btn_nav_up.pressed.connect(func(): _step_fast_travel_selection(-1))
-	nav_row.add_child(btn_nav_up)
-
-	var btn_nav_down = Button.new()
-	btn_nav_down.text = "▼"
-	btn_nav_down.custom_minimum_size = Vector2(60, 44)
-	btn_nav_down.pressed.connect(func(): _step_fast_travel_selection(1))
-	nav_row.add_child(btn_nav_down)
-
-	# 🌟 FIX THE LOOPS: Set our custom safety flag instead of modifying core input loops
-	control_panel.is_input_blocked = true
-	control_panel.set_dpad_locked(true)
+	# 🌟 FORCE UNLOCKED: Ensure physical D-pads can drive menu navigation strings
+	#control_panel.is_input_blocked = false
+	#control_panel.set_dpad_locked(false)
 	redraw_fast_travel_menu()
 
 func _step_fast_travel_selection(direction: int) -> void:
@@ -526,12 +477,13 @@ func close_fast_travel_menu() -> void:
 			print("⚠️ Fast-Travel: Category key '%s' not found in active UI cache." % selected_cat)
 			
 	# 🌟 RESTORE INPUT CHANNEL ACCESS SAFELY
-	control_panel.is_input_blocked = false
-	control_panel.set_dpad_locked(false)
+	#control_panel.is_input_blocked = false
+	#control_panel.set_dpad_locked(false)
 
 	is_menu_open = false
 	active_menu_kind = MenuKind.NONE
 	btn_shader_menu.text = LABEL_SHADER_MENU_IDLE
+	menu_center_host.visible = false
 
 	# First real SHADER MENU use ends the onboarding boot ribbon.
 	control_panel.suppress_status_readout = false
@@ -587,9 +539,13 @@ func _check_hardware_gpu_safety() -> void:
 				
 				label_safety_alert.text = "⚠️ VRAM/PERFORMANCE OVERLOAD PREVENTED: CLAMPING NOISE DETAIL"
 				get_tree().create_timer(4.0).timeout.connect(func(): label_safety_alert.text = "")
+	
+	
 				
 func _on_ui_uniform_modified(u_name: String, u_value: Variant) -> void:
 	# Route the parameters dynamically based on which pass is currently selected
+
+				
 	match active_shader_layer:
 		0:
 			if pass1_material: pass1_material.set_shader_parameter(u_name, u_value)
