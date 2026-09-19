@@ -77,7 +77,7 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_PASS
 	
 	current_preset = load("res://PatternPreset.gd").new()
-	setup_dual_pass_pipeline()
+	setup_three_pass_pipeline()
 	setup_interface_layer()
 	load_default_test_shaders()
 	
@@ -85,8 +85,7 @@ func _ready() -> void:
 	control_panel.custom_minimum_size = Vector2(0, 240)
 	control_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 
-	
-func setup_dual_pass_pipeline() -> void:
+func setup_three_pass_pipeline() -> void:
 	display_row_container = HBoxContainer.new()
 	display_row_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	display_row_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -105,9 +104,11 @@ func setup_dual_pass_pipeline() -> void:
 	canvas_stack.mouse_filter = Control.MOUSE_FILTER_PASS
 	upper_display_area.add_child(canvas_stack)
 	
+	# 🌟 STRETCH AUTO-INFLATE: Force the container to expand its textures fully
 	canvas_container = SubViewportContainer.new()
 	canvas_container.stretch = true
-	canvas_container.custom_minimum_size = current_preset.target_resolution
+	canvas_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	canvas_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	canvas_stack.add_child(canvas_container)
 	
 	label_safety_alert = Label.new()
@@ -117,9 +118,13 @@ func setup_dual_pass_pipeline() -> void:
 	label_safety_alert.add_theme_font_size_override("font_size", 14)
 	canvas_stack.add_child(label_safety_alert)
 	
+	# 🌟 ADAPTIVE PIXEL METRICS: Query maximum available device screen height
+	var max_canvas_resolution: Vector2 = Vector2(DisplayServer.window_get_size().y, DisplayServer.window_get_size().y)
+	canvas_container.custom_minimum_size = max_canvas_resolution
+	
 	# --- PASS 1: GENERATIVE MATH BUFFER ---
 	pass1_viewport = SubViewport.new()
-	pass1_viewport.size = current_preset.target_resolution
+	pass1_viewport.size = max_canvas_resolution # 🌟 Auto-inflated to max square
 	pass1_viewport.disable_3d = true
 	pass1_viewport.transparent_bg = false
 	pass1_viewport.render_target_clear_mode = SubViewport.CLEAR_MODE_ALWAYS
@@ -127,8 +132,8 @@ func setup_dual_pass_pipeline() -> void:
 	add_child(pass1_viewport)
 	
 	pass1_rect = ColorRect.new()
-	pass1_rect.size = current_preset.target_resolution
-	pass1_rect.custom_minimum_size = current_preset.target_resolution
+	pass1_rect.size = max_canvas_resolution
+	pass1_rect.custom_minimum_size = max_canvas_resolution
 	pass1_viewport.add_child(pass1_rect)
 	
 	pass1_material = ShaderMaterial.new()
@@ -136,7 +141,7 @@ func setup_dual_pass_pipeline() -> void:
 	
 	# --- PASS 2: GEOMETRIC WARPING BUFFER ---
 	pass2_viewport = SubViewport.new()
-	pass2_viewport.size = current_preset.target_resolution
+	pass2_viewport.size = max_canvas_resolution # 🌟 Auto-inflated to max square
 	pass2_viewport.disable_3d = true
 	pass2_viewport.transparent_bg = false
 	pass2_viewport.render_target_clear_mode = SubViewport.CLEAR_MODE_ALWAYS
@@ -144,8 +149,8 @@ func setup_dual_pass_pipeline() -> void:
 	add_child(pass2_viewport) 
 	
 	pass2_rect = ColorRect.new()
-	pass2_rect.size = current_preset.target_resolution
-	pass2_rect.custom_minimum_size = current_preset.target_resolution
+	pass2_rect.size = max_canvas_resolution
+	pass2_rect.custom_minimum_size = max_canvas_resolution
 	pass2_viewport.add_child(pass2_rect)
 	
 	pass2_material = ShaderMaterial.new()
@@ -153,7 +158,7 @@ func setup_dual_pass_pipeline() -> void:
 	
 	# --- PASS 3: POST-PROCESS FILTER BUFFER (VISIBLE SCREEN) ---
 	pass3_viewport = SubViewport.new()
-	pass3_viewport.size = current_preset.target_resolution
+	pass3_viewport.size = max_canvas_resolution # 🌟 Auto-inflated to max square
 	pass3_viewport.disable_3d = true
 	pass3_viewport.transparent_bg = false
 	pass3_viewport.render_target_clear_mode = SubViewport.CLEAR_MODE_ALWAYS
@@ -161,8 +166,8 @@ func setup_dual_pass_pipeline() -> void:
 	canvas_container.add_child(pass3_viewport)
 	
 	pass3_rect = ColorRect.new()
-	pass3_rect.size = current_preset.target_resolution
-	pass3_rect.custom_minimum_size = current_preset.target_resolution
+	pass3_rect.size = max_canvas_resolution
+	pass3_rect.custom_minimum_size = max_canvas_resolution
 	pass3_viewport.add_child(pass3_rect)
 	
 	pass3_material = ShaderMaterial.new()
@@ -171,6 +176,7 @@ func setup_dual_pass_pipeline() -> void:
 	# Establish the explicit texture pipeline bindings
 	pass2_material.set_shader_parameter("u_pattern_texture", pass1_viewport.get_texture())
 	pass3_material.set_shader_parameter("u_warped_texture", pass2_viewport.get_texture())
+
 
 func setup_interface_layer() -> void:
 	ui_canvas_layer = CanvasLayer.new()
@@ -354,6 +360,7 @@ func _on_shader_menu_button_pressed() -> void:
 	if active_menu_kind == MenuKind.SELECT_PASS:
 		close_select_pass_menu(false)
 	open_fast_travel_menu()
+	
 func open_fast_travel_menu() -> void:
 	var active_mat: ShaderMaterial = null
 	match active_shader_layer:

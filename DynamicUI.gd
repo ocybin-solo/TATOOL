@@ -409,7 +409,15 @@ func _on_dpad_left() -> void:
 	
 	match active_state:
 		ControlState.MENU_NAVIGATION:
-			# 1. Column Cycling: Shift left between the three core menu tabs
+			# 🌟 TAB ISOLATION CLEANOUT: Clean up any lingering open menus before switching tabs
+			if main_manager.select_pass_overlay_panel and is_instance_valid(main_manager.select_pass_overlay_panel):
+				main_manager.select_pass_overlay_panel.queue_free()
+				main_manager.select_pass_overlay_panel = null
+			if main_manager.menu_overlay_panel and is_instance_valid(main_manager.menu_overlay_panel):
+				main_manager.menu_overlay_panel.queue_free()
+				main_manager.menu_overlay_panel = null
+
+			# Column Cycling: Shift left between the three core menu tabs
 			last_menu_tab_index = posmod(last_menu_tab_index - 1, 3)
 			print("🎮 Column Navigation: Shift Left. Tab Index: ", last_menu_tab_index)
 			
@@ -420,7 +428,7 @@ func _on_dpad_left() -> void:
 				main_manager.open_fast_travel_menu()
 				
 		ControlState.VALUE_EDITING:
-			# 2. Precision Tuning: Step sensitivity presets down (coarser steps)
+			# Precision Tuning: Step sensitivity presets down (coarser steps)
 			current_sens_index = max(0, current_sens_index - 1)
 			sensitivity = sensitivity_presets[current_sens_index]
 			update_status_readout()
@@ -431,7 +439,15 @@ func _on_dpad_right() -> void:
 	
 	match active_state:
 		ControlState.MENU_NAVIGATION:
-			# 1. Column Cycling: Shift right between the three core menu tabs
+			# 🌟 TAB ISOLATION CLEANOUT: Clean up any lingering open menus before switching tabs
+			if main_manager.select_pass_overlay_panel and is_instance_valid(main_manager.select_pass_overlay_panel):
+				main_manager.select_pass_overlay_panel.queue_free()
+				main_manager.select_pass_overlay_panel = null
+			if main_manager.menu_overlay_panel and is_instance_valid(main_manager.menu_overlay_panel):
+				main_manager.menu_overlay_panel.queue_free()
+				main_manager.menu_overlay_panel = null
+
+			# Column Cycling: Shift right between the three core menu tabs
 			last_menu_tab_index = posmod(last_menu_tab_index + 1, 3)
 			print("🎮 Column Navigation: Shift Right. Tab Index: ", last_menu_tab_index)
 			
@@ -442,10 +458,11 @@ func _on_dpad_right() -> void:
 				main_manager.open_fast_travel_menu()
 				
 		ControlState.VALUE_EDITING:
-			# 2. Precision Tuning: Step sensitivity presets up (finer steps)
+			# Precision Tuning: Step sensitivity presets up (finer steps)
 			current_sens_index = min(sensitivity_presets.size() - 1, current_sens_index + 1)
 			sensitivity = sensitivity_presets[current_sens_index]
 			update_status_readout()
+
 
 func _on_channel_toggle_pressed() -> void:
 	if parsed_uniforms.is_empty(): return
