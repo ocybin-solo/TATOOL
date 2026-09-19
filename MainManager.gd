@@ -196,12 +196,6 @@ func setup_interface_layer() -> void:
 	menu_center_host = CenterContainer.new()
 	menu_center_host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	menu_center_host.mouse_filter = Control.MOUSE_FILTER_PASS
-	# 🌟 FIX: a full-rect Control on a higher CanvasLayer was intercepting
-	# every click across the whole screen even with PASS, for the entire
-	# app lifetime. A hidden Control receives no input at all, so this
-	# host only exists (visibly + functionally) while a menu is open —
-	# toggled in open_*/close_* below.
-	menu_center_host.visible = false
 	menu_canvas_layer.add_child(menu_center_host)
 
 	main_layout = VBoxContainer.new()
@@ -299,7 +293,6 @@ func open_select_pass_menu() -> void:
 	btn_select_pass.text = LABEL_MENU_ACTIVE
 	select_pass_pending_index = active_shader_layer
 
-	menu_center_host.visible = true
 	select_pass_overlay_panel = PanelContainer.new()
 	select_pass_overlay_panel.custom_minimum_size = Vector2(340, 220)
 	var style = StyleBoxFlat.new()
@@ -406,7 +399,6 @@ func close_select_pass_menu(confirm: bool) -> void:
 	is_menu_open = false
 	active_menu_kind = MenuKind.NONE
 	btn_select_pass.text = LABEL_SELECT_PASS_IDLE
-	menu_center_host.visible = false
 
 	if select_pass_overlay_panel:
 		select_pass_overlay_panel.queue_free()
@@ -447,7 +439,6 @@ func open_fast_travel_menu() -> void:
 	active_menu_kind = MenuKind.SHADER_MENU
 	btn_shader_menu.text = LABEL_MENU_ACTIVE
 
-	menu_center_host.visible = true
 	menu_overlay_panel = PanelContainer.new()
 	menu_overlay_panel.custom_minimum_size = Vector2(340, 260)
 	var style = StyleBoxFlat.new()
@@ -541,7 +532,6 @@ func close_fast_travel_menu() -> void:
 	is_menu_open = false
 	active_menu_kind = MenuKind.NONE
 	btn_shader_menu.text = LABEL_SHADER_MENU_IDLE
-	menu_center_host.visible = false
 
 	# First real SHADER MENU use ends the onboarding boot ribbon.
 	control_panel.suppress_status_readout = false
