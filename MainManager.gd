@@ -69,8 +69,6 @@ var current_time: float = 0.0
 var active_shader_layer: int = 0 
 var is_menu_open: bool = false
 
-
-
 func _ready() -> void:
 	# 🌟 REGISTER GLOBAL NODE GROUP (Removes fixed-depth path dependencies)
 	add_to_group("main_manager")
@@ -83,15 +81,11 @@ func _ready() -> void:
 	setup_interface_layer()
 	load_default_test_shaders()
 	
-	# Update the final size constraints at the bottom of MainManager.gd -> _ready()
-	control_panel.custom_minimum_size = Vector2(0, 240) # Slightly expanded vertical container boundary box
-	control_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL # Forces vertical centering
-	control_panel.apply_orientation_layout_shift(false, top_status_holder)
+	# Cleaned up container constraints for the compact hardware chassis block
+	control_panel.custom_minimum_size = Vector2(0, 240)
+	control_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 
-	# 🌟 ONBOARDING BOOT RIBBON — control_panel.suppress_status_readout
-	# defaults to true, so nothing overwrites this until the user's
-	# first real SHADER MENU use (see close_fast_travel_menu()).
-	control_panel.label_status.text = ONBOARDING_TEXT
+	
 func setup_dual_pass_pipeline() -> void:
 	display_row_container = HBoxContainer.new()
 	display_row_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -178,98 +172,72 @@ func setup_dual_pass_pipeline() -> void:
 	pass2_material.set_shader_parameter("u_pattern_texture", pass1_viewport.get_texture())
 	pass3_material.set_shader_parameter("u_warped_texture", pass2_viewport.get_texture())
 
-
 func setup_interface_layer() -> void:
 	ui_canvas_layer = CanvasLayer.new()
 	ui_canvas_layer.layer = 1
 	add_child(ui_canvas_layer)
 
+	# THE HORIZONTAL LANDSCAPE BASE SPLIT CHASSIS
+	var landscape_root = HBoxContainer.new()
+	landscape_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	landscape_root.mouse_filter = Control.MOUSE_FILTER_PASS
+	ui_canvas_layer.add_child(landscape_root)
+
+	# MAXIMUM VIEWPORT HOST LAYER
+	var viewport_host = Control.new()
+	viewport_host.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	viewport_host.custom_minimum_size.y = DisplayServer.window_get_size().y
+	viewport_host.custom_minimum_size.x = viewport_host.custom_minimum_size.y
+	landscape_root.add_child(viewport_host)
+
+	if canvas_container.get_parent():
+		canvas_container.get_parent().remove_child(canvas_container)
+	viewport_host.add_child(canvas_container)
+	canvas_container.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+
+	# THE IN-VIEWPORT TEXT MENU OVERLAY LAYER
 	menu_center_host = CenterContainer.new()
 	menu_center_host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	menu_center_host.mouse_filter = Control.MOUSE_FILTER_PASS
 	menu_center_host.visible = false
-	
-	# 🌟 THE NEW LAYER 1 PLANE + ELEVATED DRAW DEPTH
-	menu_center_host.z_index = 2 
-	ui_canvas_layer.add_child(menu_center_host)
+	menu_center_host.z_index = 2
+	viewport_host.add_child(menu_center_host)
 
-	main_layout = VBoxContainer.new()
-	main_layout.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	main_layout.mouse_filter = Control.MOUSE_FILTER_PASS
-	ui_canvas_layer.add_child(main_layout)
-	
-	top_status_holder = PanelContainer.new()
-	top_status_holder.mouse_filter = Control.MOUSE_FILTER_PASS
-	var style = StyleBoxFlat.new()
-	style.bg_color = Color(0.05, 0.05, 0.07, 0.7)
-	top_status_holder.add_theme_stylebox_override("panel", style)
-	main_layout.add_child(top_status_holder)
+	# MID-LEFT TRENCH: Vertical holder for utility toggles
+	var utility_trench = VBoxContainer.new()
+	utility_trench.custom_minimum_size = Vector2(96, 0)
+	utility_trench.alignment = BoxContainer.ALIGNMENT_CENTER
+	landscape_root.add_child(utility_trench)
 
-	var top_hbox = HBoxContainer.new()
-	top_hbox.mouse_filter = Control.MOUSE_FILTER_PASS
-	top_status_holder.add_child(top_hbox)
-	
-	var top_banner_expanding_spacer = Control.new()
-	top_banner_expanding_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	top_hbox.add_child(top_banner_expanding_spacer)
-
-	label_perf_monitor = Label.new()
-	label_perf_monitor.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	label_perf_monitor.text = "FPS: -- | VRAM: -- MB"
-	label_perf_monitor.add_theme_font_size_override("font_size", 13)
-	label_perf_monitor.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7, 0.8))
-	top_hbox.add_child(label_perf_monitor)
-	
-	var upper_spacer = Control.new()
-	upper_spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	upper_spacer.mouse_filter = Control.MOUSE_FILTER_PASS
-	main_layout.add_child(upper_spacer)
-	
-	control_panel = load("res://DynamicUI.gd").new()
-	main_layout.add_child(control_panel)
-	control_panel.uniform_changed.connect(_on_ui_uniform_modified)
-	
-	control_panel.mouse_filter=Control.MOUSE_FILTER_IGNORE
-	
-	
-	# =========================================================================
-	# 🕹️ UNIFIED THREE-BUTTON HARDWARE CLUSTER ROW
-	# =========================================================================
-	var bottom_toolbar = HBoxContainer.new()
-	bottom_toolbar.custom_minimum_size = Vector2(0, 50)
-	bottom_toolbar.alignment = BoxContainer.ALIGNMENT_CENTER
-	main_layout.add_child(bottom_toolbar)
-	
-	# 1. SELECT PASS (Left Side of Group) — opens the pass-picker overlay
-	btn_select_pass = Button.new()
-	btn_select_pass.text = LABEL_SELECT_PASS_IDLE
-	btn_select_pass.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	btn_select_pass.pressed.connect(_on_select_pass_button_pressed)
-	bottom_toolbar.add_child(btn_select_pass)
-
-	# 2. SCREENSAVER STUB (Center Anchor) — legacy EXPORT PACK button
-	# removed; this invisible, disabled, flat placeholder just reserves
-	# the toolbar grid slot for the upcoming screensaver module.
-	btn_screensaver_stub = Button.new()
-	btn_screensaver_stub.text = ""
-	btn_screensaver_stub.flat = true
-	btn_screensaver_stub.disabled = true
-	btn_screensaver_stub.visible = false
-	btn_screensaver_stub.focus_mode = Control.FOCUS_NONE
-	btn_screensaver_stub.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	btn_screensaver_stub.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	bottom_toolbar.add_child(btn_screensaver_stub)
-
-	# 3. SHADER MENU (Right Side of Group) — the existing fast-travel
-	# category menu, renamed to match the blueprint.
+	# 🌟 PWR Button on TOP (Shrink Begin alignment)
 	btn_shader_menu = Button.new()
-	btn_shader_menu.text = LABEL_SHADER_MENU_IDLE
-	btn_shader_menu.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	btn_shader_menu.pressed.connect(_on_shader_menu_button_pressed)
-	bottom_toolbar.add_child(btn_shader_menu)
+	btn_shader_menu.text = "⏻\nPWR"
+	btn_shader_menu.custom_minimum_size = Vector2(96, 96)
+	btn_shader_menu.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	btn_shader_menu.add_theme_color_override("font_color", Color.RED)
+	btn_shader_menu.add_theme_font_size_override("font_size", 14)
+	utility_trench.add_child(btn_shader_menu)
 
-	# CRITICAL COMPILER CORRECTION: 
-	# Let setup finish cleanly without querying uncompiled shader source data yet!
+	# Flexible expanding spacer between the two elements
+	var util_spacer = Control.new()
+	util_spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	utility_trench.add_child(util_spacer)
+
+	# 🌟 OPT Button on BOTTOM (Shrink End alignment)
+	btn_select_pass = Button.new()
+	btn_select_pass.text = "■\nOPT"
+	btn_select_pass.custom_minimum_size = Vector2(96, 96)
+	btn_select_pass.size_flags_vertical = Control.SIZE_SHRINK_END
+	btn_select_pass.add_theme_color_override("font_color", Color.CYAN)
+	btn_select_pass.add_theme_font_size_override("font_size", 14)
+	utility_trench.add_child(btn_select_pass)
+
+	# RIGHT SIDE CONSOLE CONTROL CHASSIS
+	control_panel = load("res://DynamicUI.gd").new()
+	control_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	landscape_root.add_child(control_panel)
+	control_panel.uniform_changed.connect(_on_ui_uniform_modified)
+
 	active_shader_layer = 0
 
 # ------------------------------------------------------------------

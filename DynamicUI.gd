@@ -1,6 +1,16 @@
 extends VBoxContainer
 
+
+
 signal uniform_changed(name: String, value: Variant)
+# 🌟 THE FOUR CORE INPUT STATES FOR THE HANDHELD CHASSIS
+enum ControlState { HIDDEN, MENU_NAVIGATION, VECTOR_EXPANSION, VALUE_EDITING }
+var active_state: int = ControlState.HIDDEN # Starts with the menu hidden
+
+# Focus memory trackers to remember where your cursor was last sitting
+var last_menu_tab_index: int = 0 # 0 = Pass, 1 = Shader, 2 = Param
+
+
 
 # Stores Category Names linked to the first uniform variable inside them
 # Format: {"colors": "u_pattern_color", "scales": "u_warp_frequency"}
@@ -43,119 +53,100 @@ var btn_channel: Button
 
 func _ready() -> void:
 	setup_ui_layout()
-
 func setup_ui_layout() -> void:
-	label_status = Label.new()
-	label_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label_status.text = "No Shader Loaded"
-	add_child(label_status)
-	
-	input_row_container = HBoxContainer.new()
-	input_row_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	input_row_container.alignment = BoxContainer.ALIGNMENT_CENTER
-	add_child(input_row_container)
-	
-	var btn_size = Vector2(66, 66)
-	
-	# Left wing layout padding (Pushes left D-pad inward for natural thumb placement)
-	var left_spacer = Control.new()
-	left_spacer.custom_minimum_size = Vector2(50, 0)
-	input_row_container.add_child(left_spacer)
-	
-	# --- D-PAD 1 (LEFT THUMB - NAVIGATION) ---
-	var nav_grid = GridContainer.new()
-	nav_grid.columns = 3
-	nav_grid.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	input_row_container.add_child(nav_grid)
-	
-	nav_grid.add_child(Control.new())
-	btn_param_up = Button.new()
-	btn_param_up.text = "PARAM\n▲"
-	btn_param_up.custom_minimum_size = btn_size
-	btn_param_up.pressed.connect(_on_left_dpad_up)
-	nav_grid.add_child(btn_param_up)
-	nav_grid.add_child(Control.new())
-	
-	btn_channel_prev = Button.new()
-	btn_channel_prev.text = "◄\nCH"
-	btn_channel_prev.custom_minimum_size = btn_size
-	btn_channel_prev.pressed.connect(_on_left_dpad_left)
-	nav_grid.add_child(btn_channel_prev)
-	
-	btn_channel = Button.new()
-	btn_channel.text = "CH: 0"
-	btn_channel.custom_minimum_size = btn_size
-	btn_channel.disabled = true
-	nav_grid.add_child(btn_channel)
-	
-	btn_channel_next = Button.new()
-	btn_channel_next.text = "CH\n►"
-	btn_channel_next.custom_minimum_size = btn_size
-	btn_channel_next.pressed.connect(_on_left_dpad_right)
-	nav_grid.add_child(btn_channel_next)
-	
-	nav_grid.add_child(Control.new())
-	btn_param_down = Button.new()
-	btn_param_down.text = "▼\nPARAM"
-	btn_param_down.custom_minimum_size = btn_size
-	btn_param_down.pressed.connect(_on_left_dpad_down)
-	nav_grid.add_child(btn_param_down)
-	nav_grid.add_child(Control.new())
-	
-	# Expanding Central Vault Spacer
-	var middle_expanding_spacer = Control.new()
-	middle_expanding_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	input_row_container.add_child(middle_expanding_spacer)
-	
-	# --- D-PAD 2 (RIGHT THUMB - VALUE MODIFIER) ---
-	var val_grid = GridContainer.new()
-	val_grid.columns = 3
-	val_grid.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	input_row_container.add_child(val_grid)
-	
-	val_grid.add_child(Control.new())
-	btn_value_up = Button.new()
-	btn_value_up.text = "VALUE\n▲"
-	btn_value_up.custom_minimum_size = btn_size
-	btn_value_up.pressed.connect(_on_right_dpad_up)
-	val_grid.add_child(btn_value_up)
-	val_grid.add_child(Control.new())
-	
-	btn_sens_left = Button.new()
-	btn_sens_left.text = "◄\nSENS"
-	btn_sens_left.custom_minimum_size = btn_size
-	btn_sens_left.pressed.connect(_on_right_dpad_left)
-	val_grid.add_child(btn_sens_left)
-	
-	label_sens_indicator = Label.new()
-	label_sens_indicator.text = "1.0"
-	label_sens_indicator.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	val_grid.add_child(label_sens_indicator)
-	
-	btn_sens_right = Button.new()
-	btn_sens_right.text = "SENS\n►"
-	btn_sens_right.custom_minimum_size = btn_size
-	btn_sens_right.pressed.connect(_on_right_dpad_right)
-	val_grid.add_child(btn_sens_right)
-	
-	val_grid.add_child(Control.new())
-	btn_value_down = Button.new()
-	btn_value_down.text = "▼\nVALUE"
-	btn_value_down.custom_minimum_size = btn_size
-	btn_value_down.pressed.connect(_on_right_dpad_down)
-	val_grid.add_child(btn_value_down)
-	val_grid.add_child(Control.new())
-	
-	# Right wing layout padding (Balances the spacing symmetrically)
-	var right_spacer = Control.new()
-	right_spacer.custom_minimum_size = Vector2(50, 0)
-	input_row_container.add_child(right_spacer)
+	# THE COMPACT HARDWARE CONTROL CONTAINER
+	var chassis_stack = VBoxContainer.new()
+	chassis_stack.alignment = BoxContainer.ALIGNMENT_CENTER
+	chassis_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	chassis_stack.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	add_child(chassis_stack)
 
-func apply_orientation_layout_shift(_to_portrait: bool, target_top_container: PanelContainer) -> void:
-	if label_status.get_parent():
-		label_status.get_parent().remove_child(label_status)
-	target_top_container.add_child(label_status)
-	update_status_readout()
+	# HIGH ROW: Centered horizontal box for A and B buttons
+	var action_row = HBoxContainer.new()
+	action_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	chassis_stack.add_child(action_row)
+
+	# A Button (✔ ACCEPT)
+	btn_channel = Button.new()
+	btn_channel.text = "✔\n  A  "
+	btn_channel.custom_minimum_size = Vector2(96, 96)
+	btn_channel.add_theme_font_size_override("font_size", 13)
+	btn_channel.add_theme_color_override("font_color", Color.GREEN)
+	btn_channel.pressed.connect(_on_action_button_a) # Wired to Accept logic
+	action_row.add_child(btn_channel)
+
+	# Perfect visual axis alignment gap matching the structural width of the D-pad cross center
+	var button_gap = Control.new()
+	button_gap.custom_minimum_size = Vector2(96, 0)
+	action_row.add_child(button_gap)
+
+	# B Button (❌ BACK)
+	btn_sens_left = Button.new()
+	btn_sens_left.text = "❌\n  B  "
+	btn_sens_left.custom_minimum_size = Vector2(96, 96)
+	btn_sens_left.add_theme_font_size_override("font_size", 13)
+	btn_sens_left.add_theme_color_override("font_color", Color.RED)
+	btn_sens_left.pressed.connect(_on_action_button_b) # Wired to Exit/Back logic
+	action_row.add_child(btn_sens_left)
+
+	# THE LEFT SHIFT FILTER: Adding a small layout spacer on the right side of the row 
+	var left_shift_spacer = Control.new()
+	left_shift_spacer.custom_minimum_size = Vector2(24, 0)
+	action_row.add_child(left_shift_spacer)
+
+	# PUSH DPAD DOWN: Increased vertical separation gap between rows
+	var vertical_spacer = Control.new()
+	vertical_spacer.custom_minimum_size = Vector2(0, 24)
+	chassis_stack.add_child(vertical_spacer)
+
+	# LOW ROW: Singular 3x3 D-Pad Cross Grid
+	var dpad_grid = GridContainer.new()
+	dpad_grid.columns = 3
+	chassis_stack.add_child(dpad_grid)
+
+	# Row 1: Dead Space | UP | Dead Space
+	dpad_grid.add_child(Control.new())
+	btn_param_up = Button.new()
+	btn_param_up.text = "▲"
+	btn_param_up.custom_minimum_size = Vector2(96, 96)
+	btn_param_up.add_theme_font_size_override("font_size", 20)
+	btn_param_up.pressed.connect(_on_dpad_up) # Wired to Navigate Up
+	dpad_grid.add_child(btn_param_up)
+	dpad_grid.add_child(Control.new())
+
+	# Row 2: LEFT | CENTER DISPLAY INDEX | RIGHT
+	btn_channel_prev = Button.new()
+	btn_channel_prev.text = "◄"
+	btn_channel_prev.custom_minimum_size = Vector2(96, 96)
+	btn_channel_prev.add_theme_font_size_override("font_size", 20)
+	btn_channel_prev.pressed.connect(_on_dpad_left) # Wired to Cycle Left
+	dpad_grid.add_child(btn_channel_prev)
+
+	# Central informational readout node block
+	label_sens_indicator = Label.new()
+	label_sens_indicator.text = "" 
+	label_sens_indicator.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label_sens_indicator.custom_minimum_size = Vector2(96, 96)
+	dpad_grid.add_child(label_sens_indicator)
+
+	btn_channel_next = Button.new()
+	btn_channel_next.text = "►"
+	btn_channel_next.custom_minimum_size = Vector2(96, 96)
+	btn_channel_next.add_theme_font_size_override("font_size", 20)
+	btn_channel_next.pressed.connect(_on_dpad_right) # Wired to Cycle Right
+	dpad_grid.add_child(btn_channel_next)
+
+	# Row 3: Dead Space | DOWN | Dead Space
+	dpad_grid.add_child(Control.new())
+	btn_param_down = Button.new()
+	btn_param_down.text = "▼"
+	btn_param_down.custom_minimum_size = Vector2(96, 96)
+	btn_param_down.add_theme_font_size_override("font_size", 20)
+	btn_param_down.pressed.connect(_on_dpad_down) # Wired to Navigate Down
+	dpad_grid.add_child(btn_param_down)
+	dpad_grid.add_child(Control.new())
+
+
 
 # Memory String Parser: Walks source strings to capture description tags
 func load_shader_source(shader_code: String) -> void:
@@ -256,7 +247,7 @@ func load_shader_source(shader_code: String) -> void:
 			#btn_value_up, btn_value_down, btn_sens_left, btn_sens_right]:
 		#if btn:
 			#btn.disabled = is_locked
-func _on_left_dpad_up() -> void:
+func _on_dpad_up() -> void:
 	var main_manager = get_tree().get_first_node_in_group("main_manager")
 	if main_manager and main_manager.is_menu_open:
 		if main_manager.active_menu_kind == main_manager.MenuKind.SELECT_PASS:
@@ -270,48 +261,129 @@ func _on_left_dpad_up() -> void:
 	active_sub_channel = 0
 	update_status_readout()
 
-func _on_left_dpad_down() -> void:
+func _on_dpad_down() -> void:
 	var main_manager = get_tree().get_first_node_in_group("main_manager")
-	if main_manager and main_manager.is_menu_open:
-		if main_manager.active_menu_kind == main_manager.MenuKind.SELECT_PASS:
-			main_manager._step_select_pass_highlight(1)
-		elif main_manager.active_menu_kind == main_manager.MenuKind.SHADER_MENU:
-			main_manager._step_fast_travel_selection(1)
-		return
-		
-	if parsed_uniforms.is_empty(): return
-	active_index = posmod(active_index + 1, parsed_uniforms.size())
-	active_sub_channel = 0 
-	update_status_readout()
+	if not main_manager: return
+	
+	match active_state:
+		ControlState.MENU_NAVIGATION:
+			# 1. Menu Scrolling: Move selection down based on which menu is active
+			if main_manager.active_menu_kind == main_manager.MenuKind.SELECT_PASS:
+				main_manager._step_select_pass_highlight(1)
+			elif main_manager.active_menu_kind == main_manager.MenuKind.SHADER_MENU:
+				main_manager._step_fast_travel_selection(1)
+				
+		ControlState.VECTOR_EXPANSION:
+			# 2. Vector Sub-Channel Cycling: Move through sub-dimensions (X, Y, etc.)
+			var max_channels = 2 if parsed_uniforms[active_index]["type"] == "vec2" else 4
+			active_sub_channel = posmod(active_sub_channel + 1, max_channels)
+			update_status_readout()
+			
+		ControlState.VALUE_EDITING:
+			# 3. Value Tweaking: Shift shader parameter numbers downward
+			modify_active_value(-1.0)
 
-func _on_left_dpad_left() -> void:
+
+func _on_action_button_b() -> void:
+	# 🌟 THE (B) BUTTON CONTROL ROUTER (CANCEL / BACK / HIDE)
 	var main_manager = get_tree().get_first_node_in_group("main_manager")
-	if main_manager and main_manager.is_menu_open:
-		if main_manager.active_menu_kind == main_manager.MenuKind.SELECT_PASS:
-			main_manager.close_select_pass_menu(false)
-		elif main_manager.active_menu_kind == main_manager.MenuKind.SHADER_MENU:
-			main_manager.close_fast_travel_menu()
-		refresh_menu_context_labels(false)
-		return
+	if not main_manager: return
+	
+	match active_state:
+		ControlState.VALUE_EDITING:
+			# 1. If editing a parameter value, exit edit mode and lock it back into list navigation
+			print("🎮 State Transition: VALUE_EDITING -> MENU_NAVIGATION")
+			active_state = ControlState.MENU_NAVIGATION
+			# Keep labels showing emoji guidance for menu navigation
+			refresh_menu_context_labels(true)
+			
+		ControlState.VECTOR_EXPANSION:
+			# 2. If viewing expanded channels (like [X] or [Y]), collapse them back to the main parameter list
+			print("🎮 State Transition: VECTOR_EXPANSION -> MENU_NAVIGATION")
+			active_state = ControlState.MENU_NAVIGATION
+			
+		ControlState.MENU_NAVIGATION:
+			# 3. If navigating lists, close the overlays entirely and hide the interface card
+			print("🎮 State Transition: MENU_NAVIGATION -> HIDDEN")
+			active_state = ControlState.HIDDEN
+			
+			# Call the clean-up routines on MainManager to pull down overlays
+			if main_manager.active_menu_kind == main_manager.MenuKind.SELECT_PASS:
+				main_manager.close_select_pass_menu(false)
+			elif main_manager.active_menu_kind == main_manager.MenuKind.SHADER_MENU:
+				main_manager.close_fast_travel_menu()
+				
+			refresh_menu_context_labels(false) # Restore regular idle dashboard labels
+			
+		ControlState.HIDDEN:
+			# 4. If already hidden, pressing B acts as a wake-up trigger to restore menu view
+			print("🎮 State Transition: HIDDEN -> MENU_NAVIGATION")
+			active_state = ControlState.MENU_NAVIGATION
+			
+			# Re-open whichever menu tab was last remembered by the system cache
+			match last_menu_tab_index:
+				0, 1: main_manager.open_select_pass_menu() # Pass/Shader menu tabs
+				2: main_manager.open_fast_travel_menu() # Parameter list tab
+			
+			refresh_menu_context_labels(true) # Activate green/red emoji guidelines
+
+# FUNCTION END: _on_left_dpad_left
+
 		
 	current_sens_index = max(0, current_sens_index - 1)
 	sensitivity = sensitivity_presets[current_sens_index]
 	update_status_readout()
 
-func _on_left_dpad_right() -> void:
+func _on_action_button_a() -> void:
+	# 🌟 THE (A) BUTTON CONTROL ROUTER (SELECT / CONFIRM / ENTER EDIT)
 	var main_manager = get_tree().get_first_node_in_group("main_manager")
-	if main_manager and main_manager.is_menu_open:
-		if main_manager.active_menu_kind == main_manager.MenuKind.SELECT_PASS:
-			main_manager.close_select_pass_menu(true)
-			main_manager.open_select_pass_menu()
-		elif main_manager.active_menu_kind == main_manager.MenuKind.SHADER_MENU:
-			var old_index = main_manager.active_menu_index
-			main_manager.close_fast_travel_menu()
-			main_manager.open_fast_travel_menu()
-			main_manager.active_menu_index = old_index
-			main_manager.redraw_fast_travel_menu()
-		refresh_menu_context_labels(true)
-		return
+	if not main_manager: return
+	
+	match active_state:
+		ControlState.HIDDEN:
+			# If hidden, the A button is locked out to prevent accidental pattern changes
+			return
+			
+		ControlState.MENU_NAVIGATION:
+			# If scrolling column items, look up what row item is highlighted
+			if main_manager.active_menu_kind == main_manager.MenuKind.SELECT_PASS:
+				# 1. If on the Pass Layer menu, apply selection immediately without closing view
+				print("🎮 Action: Confirming Pass Layer selection without closing menu card")
+				main_manager.close_select_pass_menu(true) # Apply pass selection variables
+				main_manager.open_select_pass_menu() # Re-open layout stack immediately
+				
+			elif main_manager.active_menu_kind == main_manager.MenuKind.SHADER_MENU:
+				# 2. If on a parameter row, check if it is a multi-channel vector
+				if parsed_uniforms.is_empty(): return
+				var active_uniform = parsed_uniforms[active_index]
+				var u_type = active_uniform["type"]
+				
+				if u_type == "vec2" or u_type == "vec4":
+					# Has sub-variables! Expand inline into the Vector sub-menu state
+					print("🎮 State Transition: MENU_NAVIGATION -> VECTOR_EXPANSION")
+					active_state = ControlState.VECTOR_EXPANSION
+					active_sub_channel = 0
+				else:
+					# Standard float variable. Enter Value Editing mode directly
+					print("🎮 State Transition: MENU_NAVIGATION -> VALUE_EDITING")
+					active_state = ControlState.VALUE_EDITING
+					
+			refresh_menu_context_labels(true)
+			
+		ControlState.VECTOR_EXPANSION:
+			# 3. If currently selecting a specific sub-channel vector coordinate row, enter Edit Mode on it
+			print("🎮 State Transition: VECTOR_EXPANSION -> VALUE_EDITING")
+			active_state = ControlState.VALUE_EDITING
+			refresh_menu_context_labels(true)
+			
+		ControlState.VALUE_EDITING:
+			# 4. If already in value editing mode, pressing A acts as a lock/save confirmation shortcut
+			print("🎮 Action: Saving value adjustments and locking parameters")
+			active_state = ControlState.MENU_NAVIGATION
+			refresh_menu_context_labels(true)
+
+# FUNCTION END: _on_left_dpad_right
+
 		
 	current_sens_index = min(sensitivity_presets.size() - 1, current_sens_index + 1)
 	sensitivity = sensitivity_presets[current_sens_index]
@@ -320,56 +392,60 @@ func _on_left_dpad_right() -> void:
 func _on_right_dpad_up() -> void:
 	var main_manager = get_tree().get_first_node_in_group("main_manager")
 	if main_manager and main_manager.is_menu_open:
-		_on_left_dpad_up()
+		_on_dpad_up()
 		return
 	modify_active_value(1.0)
 
 func _on_right_dpad_down() -> void:
 	var main_manager = get_tree().get_first_node_in_group("main_manager")
 	if main_manager and main_manager.is_menu_open:
-		_on_left_dpad_down()
+		_on_dpad_down()
 		return
 	modify_active_value(-1.0)
 
-func _on_right_dpad_left() -> void:
+func _on_dpad_left() -> void:
 	var main_manager = get_tree().get_first_node_in_group("main_manager")
-	if main_manager and main_manager.is_menu_open:
-		if main_manager.active_menu_kind == main_manager.MenuKind.SELECT_PASS:
-			main_manager.close_select_pass_menu(true)
-			main_manager.open_select_pass_menu()
-		elif main_manager.active_menu_kind == main_manager.MenuKind.SHADER_MENU:
-			var old_index = main_manager.active_menu_index
-			main_manager.close_fast_travel_menu()
-			main_manager.open_fast_travel_menu()
-			main_manager.active_menu_index = old_index
-			main_manager.redraw_fast_travel_menu()
-		refresh_menu_context_labels(true)
-		return
-	_on_left_dpad_left()
+	if not main_manager: return
+	
+	match active_state:
+		ControlState.MENU_NAVIGATION:
+			# 1. Column Cycling: Shift left between the three core menu tabs
+			last_menu_tab_index = posmod(last_menu_tab_index - 1, 3)
+			print("🎮 Column Navigation: Shift Left. Tab Index: ", last_menu_tab_index)
+			
+			# Cycle open handlers based on tab memory index maps
+			if last_menu_tab_index == 0 or last_menu_tab_index == 1:
+				main_manager.open_select_pass_menu()
+			elif last_menu_tab_index == 2:
+				main_manager.open_fast_travel_menu()
+				
+		ControlState.VALUE_EDITING:
+			# 2. Precision Tuning: Step sensitivity presets down (coarser steps)
+			current_sens_index = max(0, current_sens_index - 1)
+			sensitivity = sensitivity_presets[current_sens_index]
+			update_status_readout()
 
-func _on_right_dpad_right() -> void:
+func _on_dpad_right() -> void:
 	var main_manager = get_tree().get_first_node_in_group("main_manager")
-	if main_manager and main_manager.is_menu_open:
-		if main_manager.active_menu_kind == main_manager.MenuKind.SELECT_PASS:
-			main_manager.close_select_pass_menu(false)
-		elif main_manager.active_menu_kind == main_manager.MenuKind.SHADER_MENU:
-			main_manager.close_fast_travel_menu()
-		refresh_menu_context_labels(false)
-		return
-	_on_left_dpad_right()
-		
-	current_sens_index = min(sensitivity_presets.size() - 1, current_sens_index + 1)
-	sensitivity = sensitivity_presets[current_sens_index]
-	update_status_readout()
-		
-	current_sens_index = min(sensitivity_presets.size() - 1, current_sens_index + 1)
-	sensitivity = sensitivity_presets[current_sens_index]
-	update_status_readout()
-		
-	# Regular Mode: Raise sensitivity steps
-	current_sens_index = min(sensitivity_presets.size() - 1, current_sens_index + 1)
-	sensitivity = sensitivity_presets[current_sens_index]
-	update_status_readout()
+	if not main_manager: return
+	
+	match active_state:
+		ControlState.MENU_NAVIGATION:
+			# 1. Column Cycling: Shift right between the three core menu tabs
+			last_menu_tab_index = posmod(last_menu_tab_index + 1, 3)
+			print("🎮 Column Navigation: Shift Right. Tab Index: ", last_menu_tab_index)
+			
+			# Cycle open handlers based on tab memory index maps
+			if last_menu_tab_index == 0 or last_menu_tab_index == 1:
+				main_manager.open_select_pass_menu()
+			elif last_menu_tab_index == 2:
+				main_manager.open_fast_travel_menu()
+				
+		ControlState.VALUE_EDITING:
+			# 2. Precision Tuning: Step sensitivity presets up (finer steps)
+			current_sens_index = min(sensitivity_presets.size() - 1, current_sens_index + 1)
+			sensitivity = sensitivity_presets[current_sens_index]
+			update_status_readout()
 
 func _on_channel_toggle_pressed() -> void:
 	if parsed_uniforms.is_empty(): return
@@ -453,16 +529,6 @@ func update_status_readout() -> void:
 	if label_sens_indicator:
 		label_sens_indicator.text = sens_str
 		
-func refresh_menu_context_labels(menu_is_active: bool) -> void:
-	if menu_is_active:
-		# 🪞 Mirrored Layout Labels active while any overlay sits open
-		btn_channel_prev.text = "❌\nEXIT"
-		btn_channel_next.text = "✔\nACCEPT"
-		btn_sens_left.text = "✔\nACCEPT"
-		btn_sens_right.text = "❌\nEXIT"
-	else:
-		# Restore standard idle hardware dashboard labels when menus close
-		btn_channel_prev.text = "◄\nCH"
-		btn_channel_next.text = "CH\n►"
-		btn_sens_left.text = "◄\nSENS"
-		btn_sens_right.text = "SENS\n►"
+func refresh_menu_context_labels(_menu_is_active: bool) -> void:
+	# 🌟 Safe Empty Stub: Stripped legacy text swapping to protect the single-thumb layout
+	pass
