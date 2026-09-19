@@ -15,6 +15,23 @@ var active_sub_channel: int = 0
 var uniform_values: Dictionary = {}
 var is_input_blocked: bool = false
 
+# 🌟 STRICT INPUT ISOLATION: while a menu overlay is open, MainManager
+# calls set_dpad_locked(true) and both physical D-pad clusters go
+# fully inert — clicking them does nothing, menu nav is driven only
+# by the overlay's own ▲/▼ buttons.
+var btn_param_up: Button
+var btn_param_down: Button
+var btn_channel_prev: Button
+var btn_channel_next: Button
+var btn_value_up: Button
+var btn_value_down: Button
+var btn_sens_left: Button
+var btn_sens_right: Button
+
+# Onboarding boot ribbon: true until the user's first real SHADER MENU
+# use, so live D-pad taps before that don't overwrite the boot message.
+var suppress_status_readout: bool = true
+
 # Dictionary cache linking variable names directly to their parsed comments
 var uniform_descriptions: Dictionary = {}
 
@@ -52,18 +69,18 @@ func setup_ui_layout() -> void:
 	input_row_container.add_child(nav_grid)
 	
 	nav_grid.add_child(Control.new())
-	var btn_p_up = Button.new()
-	btn_p_up.text = "PARAM\n▲"
-	btn_p_up.custom_minimum_size = btn_size
-	btn_p_up.pressed.connect(_on_dpad_up)
-	nav_grid.add_child(btn_p_up)
+	btn_param_up = Button.new()
+	btn_param_up.text = "PARAM\n▲"
+	btn_param_up.custom_minimum_size = btn_size
+	btn_param_up.pressed.connect(_on_dpad_up)
+	nav_grid.add_child(btn_param_up)
 	nav_grid.add_child(Control.new())
 	
-	var btn_ch_prev = Button.new()
-	btn_ch_prev.text = "◄\nCH"
-	btn_ch_prev.custom_minimum_size = btn_size
-	btn_ch_prev.pressed.connect(_on_channel_back)
-	nav_grid.add_child(btn_ch_prev)
+	btn_channel_prev = Button.new()
+	btn_channel_prev.text = "◄\nCH"
+	btn_channel_prev.custom_minimum_size = btn_size
+	btn_channel_prev.pressed.connect(_on_channel_back)
+	nav_grid.add_child(btn_channel_prev)
 	
 	btn_channel = Button.new()
 	btn_channel.text = "CH: 0"
@@ -71,18 +88,18 @@ func setup_ui_layout() -> void:
 	btn_channel.disabled = true
 	nav_grid.add_child(btn_channel)
 	
-	var btn_ch_next = Button.new()
-	btn_ch_next.text = "CH\n►"
-	btn_ch_next.custom_minimum_size = btn_size
-	btn_ch_next.pressed.connect(_on_channel_toggle_pressed)
-	nav_grid.add_child(btn_ch_next)
+	btn_channel_next = Button.new()
+	btn_channel_next.text = "CH\n►"
+	btn_channel_next.custom_minimum_size = btn_size
+	btn_channel_next.pressed.connect(_on_channel_toggle_pressed)
+	nav_grid.add_child(btn_channel_next)
 	
 	nav_grid.add_child(Control.new())
-	var btn_p_down = Button.new()
-	btn_p_down.text = "▼\nPARAM"
-	btn_p_down.custom_minimum_size = btn_size
-	btn_p_down.pressed.connect(_on_dpad_down)
-	nav_grid.add_child(btn_p_down)
+	btn_param_down = Button.new()
+	btn_param_down.text = "▼\nPARAM"
+	btn_param_down.custom_minimum_size = btn_size
+	btn_param_down.pressed.connect(_on_dpad_down)
+	nav_grid.add_child(btn_param_down)
 	nav_grid.add_child(Control.new())
 	
 	# Expanding Central Vault Spacer
@@ -97,36 +114,36 @@ func setup_ui_layout() -> void:
 	input_row_container.add_child(val_grid)
 	
 	val_grid.add_child(Control.new())
-	var btn_val_up = Button.new()
-	btn_val_up.text = "VALUE\n▲"
-	btn_val_up.custom_minimum_size = btn_size
-	btn_val_up.pressed.connect(func(): modify_active_value(1.0))
-	val_grid.add_child(btn_val_up)
+	btn_value_up = Button.new()
+	btn_value_up.text = "VALUE\n▲"
+	btn_value_up.custom_minimum_size = btn_size
+	btn_value_up.pressed.connect(func(): modify_active_value(1.0))
+	val_grid.add_child(btn_value_up)
 	val_grid.add_child(Control.new())
 	
-	var btn_sens_down = Button.new()
-	btn_sens_down.text = "◄\nSENS"
-	btn_sens_down.custom_minimum_size = btn_size
-	btn_sens_down.pressed.connect(_on_dpad_left)
-	val_grid.add_child(btn_sens_down)
+	btn_sens_left = Button.new()
+	btn_sens_left.text = "◄\nSENS"
+	btn_sens_left.custom_minimum_size = btn_size
+	btn_sens_left.pressed.connect(_on_dpad_left)
+	val_grid.add_child(btn_sens_left)
 	
 	label_sens_indicator = Label.new()
 	label_sens_indicator.text = "1.0"
 	label_sens_indicator.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	val_grid.add_child(label_sens_indicator)
 	
-	var btn_sens_up = Button.new()
-	btn_sens_up.text = "SENS\n►"
-	btn_sens_up.custom_minimum_size = btn_size
-	btn_sens_up.pressed.connect(_on_dpad_right)
-	val_grid.add_child(btn_sens_up)
+	btn_sens_right = Button.new()
+	btn_sens_right.text = "SENS\n►"
+	btn_sens_right.custom_minimum_size = btn_size
+	btn_sens_right.pressed.connect(_on_dpad_right)
+	val_grid.add_child(btn_sens_right)
 	
 	val_grid.add_child(Control.new())
-	var btn_val_down = Button.new()
-	btn_val_down.text = "▼\nVALUE"
-	btn_val_down.custom_minimum_size = btn_size
-	btn_val_down.pressed.connect(func(): modify_active_value(-1.0))
-	val_grid.add_child(btn_val_down)
+	btn_value_down = Button.new()
+	btn_value_down.text = "▼\nVALUE"
+	btn_value_down.custom_minimum_size = btn_size
+	btn_value_down.pressed.connect(func(): modify_active_value(-1.0))
+	val_grid.add_child(btn_value_down)
 	val_grid.add_child(Control.new())
 	
 	# Right wing layout padding (Balances the spacing symmetrically)
@@ -231,29 +248,22 @@ func load_shader_source(shader_code: String) -> void:
 	active_sub_channel = 0
 	update_status_readout()
 	
+func set_dpad_locked(is_locked: bool) -> void:
+	# Strict Input Isolation: flip every physical D-pad button inert
+	# the instant a menu overlay opens. Menu nav from here on is
+	# driven only by the overlay's own ▲/▼ buttons.
+	for btn in [btn_param_up, btn_param_down, btn_channel_prev, btn_channel_next,
+			btn_value_up, btn_value_down, btn_sens_left, btn_sens_right]:
+		if btn:
+			btn.disabled = is_locked
+
 func _on_dpad_up() -> void:
-	# 🌟 SECURE GROUP-BASED NAVIGATION
-	var main_manager = get_tree().get_first_node_in_group("main_manager")
-
-	if main_manager and main_manager.get("is_menu_open"):
-		main_manager.active_menu_index = posmod(main_manager.active_menu_index - 1, main_manager.active_menu_categories.size())
-		main_manager.redraw_fast_travel_menu()
-		return
-
 	if parsed_uniforms.is_empty(): return
 	active_index = posmod(active_index - 1, parsed_uniforms.size())
 	active_sub_channel = 0
 	update_status_readout()
 
 func _on_dpad_down() -> void:
-	# 🌟 SECURE GROUP-BASED NAVIGATION
-	var main_manager = get_tree().get_first_node_in_group("main_manager")
-
-	if main_manager and main_manager.get("is_menu_open"):
-		main_manager.active_menu_index = posmod(main_manager.active_menu_index + 1, main_manager.active_menu_categories.size())
-		main_manager.redraw_fast_travel_menu()
-		return
-
 	if parsed_uniforms.is_empty(): return
 	active_index = posmod(active_index + 1, parsed_uniforms.size())
 	active_sub_channel = 0 
@@ -322,6 +332,7 @@ func get_sub_channel_name(u_type: String) -> String:
 	return ""
 
 func update_status_readout() -> void:
+	if suppress_status_readout: return
 	if parsed_uniforms.is_empty(): return
 	var active = parsed_uniforms[active_index]
 	var u_type = active["type"]

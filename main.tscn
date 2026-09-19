@@ -1,6 +1,900 @@
 [gd_scene format=3 uid="uid://bcnt88dwpdalh"]
 
-[ext_resource type="Script" uid="uid://dgtuk05v0xbo3" path="res://MainManager.gd" id="1_ig7tw"]
+[sub_resource type="GDScript" id="GDScript_7dm0k"]
+script/source = "extends VBoxContainer
+
+# Layout Structure Modules
+var top_status_holder: PanelContainer
+var display_row_container: HBoxContainer
+var upper_display_area: CenterContainer
+var main_layout: VBoxContainer
+var control_panel: VBoxContainer
+
+# Dedicated Visual Warning Label for the Safety Valve
+var label_safety_alert: Label
+var label_perf_monitor: Label
+
+# --- REFACTORED MODULAR OVERLAY HOOKS ---
+var overlay_layer: CanvasLayer
+var overlay_root: CenterContainer
+var menu_overlay_panel: PanelContainer
+var menu_list_box: VBoxContainer
+var active_menu_categories: Array = []
+var active_menu_index: int = 0
+var current_menu_type: String = \"none\" # \"none\", \"shader\", or \"pass\"
+
+# Toolbar Button References for Reactive Renaming
+var btn_select_pass_ref: Button
+var btn_shader_menu_ref: Button
+
+# --- PERSISTENT PARAMETER SELECTION INDEX MEMORY LAYER ---
+var p1_saved_index: int = 0
+var p1_saved_sub_channel: int = 0
+var p2_saved_index: int = 0
+var p2_saved_sub_channel: int = 0
+var p3_saved_index: int = 0
+var p3_saved_sub_channel: int = 0
+
+# --- TRIPLE PASS VIEWPORT ARCHITECTURE ---
+var pass1_viewport: SubViewport
+var pass1_rect: ColorRect
+var pass1_material: ShaderMaterial
+
+var pass2_viewport: SubViewport
+var pass2_rect: ColorRect
+var pass2_material: ShaderMaterial
+
+var canvas_container: SubViewportContainer
+var pass3_viewport: SubViewport
+var pass3_rect: ColorRect
+var pass3_material: ShaderMaterial
+
+
+# Core State Trackers
+var current_preset: PatternPreset
+var current_time: float = 0.0
+
+# ==================== TRIPLE-PASS SHADER LIBRARIES ====================
+var pass1_library: Dictionary = {}
+var pass2_library: Dictionary = {}
+var pass3_library: Dictionary = {}
+
+var active_pass1_shader_name: String = \"Master Pipeline\"
+var active_pass2_shader_name: String = \"None Selected\"
+var active_pass3_shader_name: String = \"None Selected\"
+
+const PASSTHROUGH_SHADER_CODE: String = \"\"\"
+shader_type canvas_item;
+uniform sampler2D u_pattern_texture : filter_linear;
+void fragment() {
+	COLOR = texture(u_pattern_texture, UV);
+}
+\"\"\"
+
+var active_shader_layer: int = 0 
+var is_menu_open: bool = false
+
+# --- LIVE AUTOMATION ENGINE STATES ---
+var is_automation_active: bool = false
+var automation_timer: float = 0.0
+var automation_interval: float = 4.0 
+var current_auto_color: Color = Color(0.1, 0.7, 0.9, 1.0)
+var target_auto_color: Color = Color(0.1, 0.7, 0.9, 1.0)
+var color_blend_speed: float = 0.3 
+
+var automation_registry: Dictionary = {}
+
+func _ready() -> void:
+	add_to_group(\"main_manager\")
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	mouse_filter = Control.MOUSE_FILTER_PASS
+	
+	current_preset = load(\"res://PatternPreset.gd\").new()
+	setup_dual_pass_pipeline()
+	setup_interface_layer()
+	load_default_test_shaders()
+	
+	control_panel.custom_minimum_size = Vector2(0, 240) 
+	control_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL 
+	control_panel.apply_orientation_layout_shift(false, top_status_holder)
+	_init_automation_registry()
+
+	
+func setup_dual_pass_pipeline() -> void:
+	display_row_container = HBoxContainer.new()
+	display_row_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	display_row_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	display_row_container.alignment = BoxContainer.ALIGNMENT_CENTER
+	display_row_container.mouse_filter = Control.MOUSE_FILTER_PASS
+	add_child(display_row_container)
+	
+	upper_display_area = CenterContainer.new()
+	upper_display_area.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	upper_display_area.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	upper_display_area.mouse_filter = Control.MOUSE_FILTER_PASS
+	display_row_container.add_child(upper_display_area)
+	
+	var canvas_stack = VBoxContainer.new()
+	canvas_stack.alignment = BoxContainer.ALIGNMENT_CENTER
+	canvas_stack.mouse_filter = Control.MOUSE_FILTER_PASS
+	upper_display_area.add_child(canvas_stack)
+	
+	canvas_container = SubViewportContainer.new()
+	canvas_container.mouse_filter =Control.MOUSE_FILTER_PASS
+	canvas_container.stretch = true
+	canvas_container.custom_minimum_size = current_preset.target_resolution
+	canvas_stack.add_child(canvas_container)
+	
+	label_safety_alert = Label.new()
+	label_safety_alert.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label_safety_alert.text = \"\"
+	label_safety_alert.add_theme_color_override(\"font_color\", Color.RED)
+	label_safety_alert.add_theme_font_size_override(\"font_size\", 14)
+	canvas_stack.add_child(label_safety_alert)
+	
+	pass1_viewport = SubViewport.new()
+	pass1_viewport.size = current_preset.target_resolution
+	pass1_viewport.disable_3d = true
+	pass1_viewport.transparent_bg = false
+	pass1_viewport.render_target_clear_mode = SubViewport.CLEAR_MODE_ALWAYS
+	pass1_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child(pass1_viewport)
+	
+	pass1_rect = ColorRect.new()
+	pass1_rect.size = current_preset.target_resolution
+	pass1_rect.custom_minimum_size = current_preset.target_resolution
+	pass1_viewport.add_child(pass1_rect)
+	
+	pass1_material = ShaderMaterial.new()
+	pass1_rect.material = pass1_material
+	pass2_viewport = SubViewport.new()
+	pass2_viewport.size = current_preset.target_resolution
+	pass2_viewport.disable_3d = true
+	pass2_viewport.transparent_bg = false
+	pass2_viewport.render_target_clear_mode = SubViewport.CLEAR_MODE_ALWAYS
+	pass2_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child(pass2_viewport) 
+	
+	pass2_rect = ColorRect.new()
+	pass2_rect.size = current_preset.target_resolution
+	pass2_rect.custom_minimum_size = current_preset.target_resolution
+	pass2_viewport.add_child(pass2_rect)
+	
+	pass2_material = ShaderMaterial.new()
+	pass2_rect.material = pass2_material
+	
+	pass3_viewport = SubViewport.new()
+	pass3_viewport.size = current_preset.target_resolution
+	pass3_viewport.disable_3d = true
+	pass3_viewport.transparent_bg = false
+	pass3_viewport.render_target_clear_mode = SubViewport.CLEAR_MODE_ALWAYS
+	pass3_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	canvas_container.add_child(pass3_viewport)
+	
+	pass3_rect = ColorRect.new()
+	pass3_rect.size = current_preset.target_resolution
+	pass3_rect.custom_minimum_size = current_preset.target_resolution
+	pass3_viewport.add_child(pass3_rect)
+	
+	pass3_material = ShaderMaterial.new()
+	pass3_rect.material = pass3_material
+	
+	pass2_material.set_shader_parameter(\"u_pattern_texture\", pass1_viewport.get_texture())
+	pass3_material.set_shader_parameter(\"u_pattern_texture\", pass2_viewport.get_texture())
+
+func setup_interface_layer() -> void:
+	var ui_layer = CanvasLayer.new()
+	add_child(ui_layer)
+	
+	main_layout = VBoxContainer.new()
+	main_layout.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	ui_layer.add_child(main_layout)
+	
+	top_status_holder = PanelContainer.new()
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.05, 0.05, 0.07, 0.7)
+	top_status_holder.add_theme_stylebox_override(\"panel\", style)
+	main_layout.add_child(top_status_holder)
+
+	var top_hbox = HBoxContainer.new()
+	top_status_holder.add_child(top_hbox)
+	
+	var top_banner_expanding_spacer = Control.new()
+	top_banner_expanding_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top_hbox.add_child(top_banner_expanding_spacer)
+
+	label_perf_monitor = Label.new()
+	label_perf_monitor.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	label_perf_monitor.text = \"FPS: -- | VRAM: -- MB\"
+	label_perf_monitor.add_theme_font_size_override(\"font_size\", 13)
+	label_perf_monitor.add_theme_color_override(\"font_color\", Color(0.7, 0.7, 0.7, 0.8))
+	top_hbox.add_child(label_perf_monitor)
+	
+	var upper_spacer = Control.new()
+	upper_spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	upper_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	main_layout.add_child(upper_spacer)
+
+	# ✅ DEDICATED TOP-MOST OVERLAY LAYER
+	# Sits on its own CanvasLayer above ui_layer, so the modular menu is
+	# unambiguously topmost for both rendering AND input hit-testing,
+	# instead of relying on cross-CanvasLayer MOUSE_FILTER_PASS behavior.
+	overlay_layer = CanvasLayer.new()
+	overlay_layer.layer = 2
+	add_child(overlay_layer)
+
+	overlay_root = CenterContainer.new()
+	overlay_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay_root.mouse_filter = Control.MOUSE_FILTER_IGNORE # empty space is click-through when no menu is open
+	overlay_layer.add_child(overlay_root)
+	
+	control_panel = load(\"res://DynamicUI.gd\").new()
+	main_layout.add_child(control_panel)
+	control_panel.uniform_changed.connect(_on_ui_uniform_modified)
+	
+	var bottom_toolbar = HBoxContainer.new()
+	bottom_toolbar.custom_minimum_size = Vector2(0, 50)
+	bottom_toolbar.alignment = BoxContainer.ALIGNMENT_CENTER
+	main_layout.add_child(bottom_toolbar)
+	
+	# ✅ UX REFINEMENT: Explicit Pass Selection overlay button hook
+	btn_select_pass_ref = Button.new()
+	btn_select_pass_ref.text = \"🔄 SELECT PASS\"
+	btn_select_pass_ref.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn_select_pass_ref.pressed.connect(_on_select_pass_pressed)
+	bottom_toolbar.add_child(btn_select_pass_ref)
+	
+	var btn_screensaver_placeholder = Button.new()
+	btn_screensaver_placeholder.text = \"\"
+	btn_screensaver_placeholder.disabled = true
+	btn_screensaver_placeholder.flat = true
+	btn_screensaver_placeholder.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn_screensaver_placeholder.add_theme_stylebox_override(\"normal\", StyleBoxEmpty.new())
+	btn_screensaver_placeholder.add_theme_stylebox_override(\"disabled\", StyleBoxEmpty.new())
+	bottom_toolbar.add_child(btn_screensaver_placeholder)
+	
+	var btn_reset_params = Button.new()
+	btn_reset_params.text = \"⚠️ RESET\"
+	btn_reset_params.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn_reset_params.pressed.connect(_on_global_factory_reset_pressed)
+	bottom_toolbar.add_child(btn_reset_params)
+	
+	# ✅ UX REFINEMENT: Self-Renaming Shader Menu handler link
+	btn_shader_menu_ref = Button.new()
+	btn_shader_menu_ref.text = \"🕹️ SHADER MENU\"
+	btn_shader_menu_ref.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn_shader_menu_ref.pressed.connect(_on_shader_menu_pressed)
+	bottom_toolbar.add_child(btn_shader_menu_ref)
+
+	active_shader_layer = 0
+func _on_select_pass_pressed() -> void:
+	if is_menu_open and current_menu_type == \"shader\": return
+	
+	if is_menu_open and current_menu_type == \"pass\":
+		close_modular_menu()
+	else:
+		if is_menu_open: close_modular_menu()
+		open_modular_menu(\"pass\")
+
+func _on_shader_menu_pressed() -> void:
+	if is_menu_open and current_menu_type == \"pass\": return
+	
+	if is_menu_open and current_menu_type == \"shader\":
+		close_modular_menu()
+	else:
+		if is_menu_open: close_modular_menu()
+		open_modular_menu(\"shader\")
+
+func open_modular_menu(type: String) -> void:
+	is_menu_open = true
+	current_menu_type = type
+	control_panel.is_input_blocked = true # Complete isolation lock across both physical D-pads
+	
+	# Update layout button labels reactively
+	if type == \"shader\": btn_shader_menu_ref.text = \"SELECT & CLOSE MENU\"
+	elif type == \"pass\": btn_select_pass_ref.text = \"SELECT & CLOSE MENU\"
+	
+	if type == \"shader\":
+		if active_shader_layer == 0:
+			active_menu_categories = [\"Domain Warping\", \"Voronoi Cells\", \"Gyroid Quantum Foam\", \"Reaction-Diffusion Machine\", \"Truchet Labyrinth\"]
+		elif active_shader_layer == 1:
+			active_menu_categories = [\"Distortion Effect: Off\", \"Hyperbolic Poincare Disk\", \"Infinite Mobius Tunnel\", \"Dynamic Origami Folds\"]
+		elif active_shader_layer == 2:
+			active_menu_categories = [\"Lens Aberration Modifiers\", \"Sobel-Edge Neon Wires\", \"Shimmering Aura Fields\"]
+	elif type == \"pass\":
+		active_menu_categories = [\"PASS 1: GENERATIVE BASE PATTERN\", \"PASS 2: GEOMETRIC WARPING TRANSFORMS\", \"PASS 3: POST-PROCESS FILTERS\"]
+		
+	active_menu_index = active_shader_layer if type == \"pass\" else 0
+	
+	menu_overlay_panel = PanelContainer.new()
+	menu_overlay_panel.custom_minimum_size = Vector2(340, 240)
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.02, 0.02, 0.04, 0.94)
+	style.set_border_width_all(2)
+	style.border_color = Color(0.0, 0.85, 1.0, 0.9)
+	style.set_corner_radius_all(8)
+
+	menu_overlay_panel.add_theme_stylebox_override(\"panel\", style)
+	overlay_root.add_child(menu_overlay_panel)
+	
+	var layout_vbox = VBoxContainer.new()
+	layout_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	menu_overlay_panel.add_child(layout_vbox)
+	layout_vbox.mouse_filter = Control.MOUSE_FILTER_PASS
+	
+	menu_list_box = VBoxContainer.new()
+	menu_list_box.alignment = BoxContainer.ALIGNMENT_CENTER
+	layout_vbox.add_child(menu_list_box)
+	menu_list_box.mouse_filter = Control.MOUSE_FILTER_PASS
+	
+	
+	# ✅ UX REFINEMENT: Explicit Menu-Mounted Structural Navigation Row
+	var menu_nav_row = HBoxContainer.new()
+	menu_nav_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	layout_vbox.add_child(menu_nav_row)
+	menu_nav_row.mouse_filter = Control.MOUSE_FILTER_PASS
+	
+	var btn_menu_up = Button.new()
+	btn_menu_up.text = \" ▲ \"
+	btn_menu_up.custom_minimum_size = Vector2(60, 40)
+
+	btn_menu_up.pressed.connect(func(): _navigate_menu_index(-1))
+	menu_nav_row.add_child(btn_menu_up)
+	
+	var menu_nav_spacer = Control.new()
+	menu_nav_spacer.custom_minimum_size = Vector2(20, 0)
+	menu_nav_spacer.mouse_filter = Control.MOUSE_FILTER_PASS
+	menu_nav_row.add_child(menu_nav_spacer)
+	
+	var btn_menu_down = Button.new()
+	btn_menu_down.text = \" ▼ \"
+	btn_menu_down.custom_minimum_size = Vector2(60, 40)
+	btn_menu_down.pressed.connect(func(): _navigate_menu_index(1))
+
+	menu_nav_row.add_child(btn_menu_down)
+	
+	redraw_modular_menu()
+		# Paste this at the very bottom of open_modular_menu():
+	menu_overlay_panel.mouse_entered.connect(func(): print(\"📥 Mouse entered OVERLAY CARD boundary\"))
+	btn_menu_up.mouse_entered.connect(func(): print(\"📥 Mouse entered UP ARROW button boundary\"))
+	btn_menu_down.mouse_entered.connect(func(): print(\"📥 Mouse entered DOWN ARROW button boundary\"))
+
+
+func _navigate_menu_index(direction: int) -> void:
+	if active_menu_categories.is_empty(): return
+	active_menu_index = posmod(active_menu_index + direction, active_menu_categories.size())
+	redraw_modular_menu()
+func redraw_modular_menu() -> void:
+	for child in menu_list_box.get_children(): child.queue_free()
+	
+	var label_title = Label.new()
+	label_title.text = \" 🕹️ SHADER MENU \" if current_menu_type == \"shader\" else \" 🔄 LAYER SELECT PASS \"
+	label_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label_title.add_theme_color_override(\"font_color\", Color.CYAN)
+	menu_list_box.add_child(label_title)
+	
+	for i in range(active_menu_categories.size()):
+		var lbl = Label.new()
+		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		if i == active_menu_index:
+			lbl.text = \" ▶  %s  ◀ \" % active_menu_categories[i].to_upper()
+			lbl.add_theme_color_override(\"font_color\", Color.YELLOW)
+		else:
+			lbl.text = \"    %s    \" % active_menu_categories[i].to_upper()
+			lbl.add_theme_color_override(\"font_color\", Color.DARK_GRAY)
+		menu_list_box.add_child(lbl)
+
+func close_modular_menu() -> void:
+	if not menu_overlay_panel: return
+	
+	if current_menu_type == \"pass\":
+		_cache_active_layer_indices()
+		
+		# ✅ CRITICAL RESYNC: Explicitly set the active pass layer tracker BEFORE loading shader sources
+		active_shader_layer = active_menu_index
+		
+		var active_mat: ShaderMaterial = null
+		match active_shader_layer:
+			0:
+				active_mat = pass1_material
+				control_panel.active_index = p1_saved_index
+				control_panel.active_sub_channel = p1_saved_sub_channel
+			1:
+				active_mat = pass2_material
+				control_panel.active_index = p2_saved_index
+				control_panel.active_sub_channel = p2_saved_sub_channel
+			2:
+				active_mat = pass3_material
+				control_panel.active_index = p3_saved_index
+				control_panel.active_sub_channel = p3_saved_sub_channel
+				
+		control_panel.relative_category_index = 0
+		control_panel.active_category_uniforms.clear()
+		
+		if active_mat and active_mat.shader:
+			control_panel.load_shader_source(active_mat.shader.code)
+			for u_name in control_panel.uniform_values:
+				var val = active_mat.get_shader_parameter(u_name)
+				if val != null: control_panel.uniform_values[u_name] = val
+				
+	elif current_menu_type == \"shader\":
+		if active_shader_layer == 0:
+			pass1_material.set_shader_parameter(\"u_render_mode\", float(active_menu_index))
+			control_panel.uniform_values[\"u_render_mode\"] = float(active_menu_index)
+		elif active_shader_layer == 1:
+			pass2_material.set_shader_parameter(\"u_warp_mode\", float(active_menu_index))
+			control_panel.uniform_values[\"u_warp_mode\"] = float(active_menu_index)
+		
+		var active_mat: ShaderMaterial = pass1_material if active_shader_layer == 0 else (pass2_material if active_shader_layer == 1 else pass3_material)
+		if active_mat and active_mat.shader:
+			control_panel.load_shader_source(active_mat.shader.code)
+			
+	btn_shader_menu_ref.text = \"🕹️ SHADER MENU\"
+	btn_select_pass_ref.text = \"🔄 SELECT PASS\"
+	
+	control_panel.is_input_blocked = false
+	control_panel.update_status_readout()
+	
+	menu_overlay_panel.queue_free()
+	menu_overlay_panel = null
+	current_menu_type = \"none\"
+	is_menu_open = false
+
+func _cache_active_layer_indices() -> void:
+	match active_shader_layer:
+		0:
+			p1_saved_index = control_panel.active_index
+			p1_saved_sub_channel = control_panel.active_sub_channel
+		1:
+			p2_saved_index = control_panel.active_index
+			p2_saved_sub_channel = control_panel.active_sub_channel
+		2:
+			p3_saved_index = control_panel.active_index
+			p3_saved_sub_channel = control_panel.active_sub_channel
+
+func _process(delta: float) -> void:
+	current_time += delta
+	if current_time > 7200.0: current_time = 0.0 
+
+	for mat in [pass1_material, pass2_material, pass3_material]:
+		if mat and mat.shader:
+			mat.set_shader_parameter(\"u_time\", current_time)
+			mat.set_shader_parameter(\"manual_time\", current_time)
+		
+	_check_hardware_gpu_safety()
+
+func _check_hardware_gpu_safety() -> void:
+	var current_vram_mb = Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED) / 1024.0 / 1024.0
+	var current_fps = Engine.get_frames_per_second()
+	
+	if label_perf_monitor:
+		label_perf_monitor.text = \" FPS: %d  |  VRAM: %.1f MB   \" % [current_fps, current_vram_mb]
+	
+	var vram_safety_trip_point = 1000.0 
+	if current_vram_mb > vram_safety_trip_point or current_fps < 30.0:
+		if pass1_material:
+			pass1_material.set_shader_parameter(\"u_noise_detail\", 2.0)
+			control_panel.uniform_values[\"u_noise_detail\"] = 2.0
+			control_panel.update_status_readout()
+
+
+
+func _on_ui_uniform_modified(u_name: String, u_value: Variant) -> void:
+	match active_shader_layer:
+		0:
+			if pass1_material: pass1_material.set_shader_parameter(u_name, u_value)
+		1:
+			if pass2_material: pass2_material.set_shader_parameter(u_name, u_value)
+		2:
+			if pass3_material: pass3_material.set_shader_parameter(u_name, u_value)
+	current_preset.uniform_values[u_name] = u_value
+
+func _init_automation_registry() -> void:
+	automation_registry.clear()
+	automation_registry[\"u_warp_strength\"] = {\"current\": 1.1, \"target\": 1.1, \"min\": 0.2, \"max\": 2.5, \"speed\": 0.15}
+	automation_registry[\"u_noise_detail\"]  = {\"current\": 4.0, \"target\": 4.0, \"min\": 2.0, \"max\": 5.0, \"speed\": 0.1}
+	automation_registry[\"u_flow_speed\"]    = {\"current\": 0.4, \"target\": 0.4, \"min\": 0.05, \"max\": 1.2, \"speed\": 0.2}
+	automation_registry[\"u_segments\"]       = {\"current\": 6.0, \"target\": 6.0, \"min\": 2.2, \"max\": 16.0, \"speed\": 0.3}
+	automation_registry[\"u_rotation_speed\"] = {\"current\": 0.2, \"target\": 0.2, \"min\": -0.5, \"max\": 0.5, \"speed\": 0.25}
+	automation_registry[\"u_edge_threshold\"] = {\"current\": 0.15, \"target\": 0.15, \"min\": 0.05, \"max\": 0.4, \"speed\": 0.2}
+	automation_registry[\"u_glow_intensity\"] = {\"current\": 2.5, \"target\": 2.5, \"min\": 0.5, \"max\": 5.0, \"speed\": 0.4}
+
+	if control_panel and control_panel.uniform_values.has(\"u_pattern_color\"):
+		current_auto_color = control_panel.uniform_values[\"u_pattern_color\"]
+		target_auto_color = current_auto_color
+
+func _process_live_automation(delta: float) -> void:
+	if not is_automation_active: return
+	automation_timer += delta
+	var force_new_targets: bool = false
+	
+	if automation_timer >= automation_interval:
+		automation_timer = 0.0
+		force_new_targets = true
+		target_auto_color = Color.from_hsv(randf(), 1.0, 0.75, 1.0)
+		
+	current_auto_color = current_auto_color.lerp(target_auto_color, delta * color_blend_speed)
+	if pass1_material:
+		pass1_material.set_shader_parameter(\"u_pattern_color\", current_auto_color)
+	control_panel.uniform_values[\"u_pattern_color\"] = current_auto_color
+		
+	for p_name in automation_registry:
+		var p = automation_registry[p_name]
+		if force_new_targets or abs(p[\"current\"] - p[\"target\"]) < 0.01:
+			p[\"target\"] = randf_range(p[\"min\"], p[\"max\"])
+			
+		var blend_weight = delta * p[\"speed\"]
+		p[\"current\"] = lerp(p[\"current\"], p[\"target\"], blend_weight)
+		
+		if pass1_material and p_name in [\"u_warp_strength\", \"u_noise_detail\", \"u_flow_speed\"]:
+			pass1_material.set_shader_parameter(p_name, p[\"current\"])
+		elif pass2_material and p_name in [\"u_segments\", \"u_rotation_speed\"]:
+			pass2_material.set_shader_parameter(p_name, p[\"current\"])
+		elif pass3_material and p_name in [\"u_edge_threshold\", \"u_glow_intensity\"]:
+			pass3_material.set_shader_parameter(p_name, p[\"current\"])
+		control_panel.uniform_values[p_name] = p[\"current\"]
+	control_panel.update_status_readout()
+
+func load_default_test_shaders() -> void:
+	# =========================================================================
+	# TATOOL V2 COMPLETE UNIFIED MASTER PIPELINE STRING
+	# =========================================================================
+	var master_shader_code = \"\"\"
+	shader_type canvas_item;
+
+	uniform float u_time;
+
+	// CAT: 🌌 Pass 1 Mode Selector
+	// DESC: 0=Domain Warp, 1=Voronoi, 2=Gyroid Foam, 3=Reaction-Diffusion, 4=Truchet Labyrinth
+	uniform float u_render_mode : hint_range(0.0, 4.0, 1.0) = 0.0;
+
+	// CAT: 🌀 Global Spatial Controls
+	// DESC: Multiplier factor for the total grid density scaling partition size.
+	uniform float u_global_scale : hint_range(1.0, 20.0, 0.1) = 4.0;
+	// DESC: Temporal clock multiplier for the active texture engine.
+	uniform float u_global_speed : hint_range(-2.0, 2.0, 0.01) = 0.4;
+
+	// CAT: 🧬 Gyroid Foam Parameters
+	// DESC: Animates the virtual 3D depth slice plane over time.
+	uniform float u_gyroid_depth_speed : hint_range(0.0, 2.0, 0.01) = 0.5;
+	// DESC: Sharpness threshold boundary thickness multiplier.
+	uniform float u_gyroid_sharpness : hint_range(0.1, 5.0, 0.1) = 1.5;
+
+	// CAT: 🧪 Reaction-Diffusion Math
+	// DESC: Frequency separation density factor between pattern loops.
+	uniform float u_rd_frequency : hint_range(1.0, 30.0, 0.5) = 12.0;
+	// DESC: Internal matrix feedback blending sharpness step value.
+	uniform float u_rd_feedback : hint_range(0.1, 10.0, 0.1) = 3.0;
+
+	// CAT: 🧱 Truchet Tiling Matrix
+	// DESC: Sets individual path line thickness limits across the tile grid boundaries.
+	uniform float u_truchet_thickness : hint_range(0.02, 0.4, 0.01) = 0.08;
+
+	// CAT: 🔲 Pass 2 Distortion Selector
+	// DESC: 0=Off, 1=Poincare Disk, 2=Mobius Zoom, 3=Origami Fold
+	uniform float u_warp_mode : hint_range(0.0, 3.0, 1.0) = 0.0;
+
+	// CAT: 🕸️ Poincare Disk Controls
+	// DESC: Controls interpolation between flat space and edge compression.
+	uniform float u_poincare_strength : hint_range(0.0, 1.0, 0.01) = 0.5;
+	// DESC: Outer boundary radius limits for the hyperbolic circle edge.
+	uniform float u_poincare_radius : hint_range(0.1, 2.0, 0.01) = 0.9;
+
+	// CAT: 🌀 Mobius Tunnel Controls
+	// DESC: Adjusts internal angular shear rotation parameters.
+	uniform float u_mobius_twist : hint_range(-3.14159, 3.14159, 0.01) = 0.0;
+	// DESC: Continuous infinite scale progression modifier.
+	uniform float u_mobius_zoom : hint_range(0.1, 4.0, 0.01) = 1.0;
+
+	// CAT: 📐 Origami Folding Matrices
+	// DESC: Sets numerical reflection iterations within the structural folding loops.
+	uniform float u_fold_iterations : hint_range(1.0, 8.0, 1.0) = 4.0;
+	// DESC: Static angular skew factor applied during folding pass transforms.
+	uniform float u_fold_rotation : hint_range(0.0, 6.28318, 0.01) = 0.0;
+
+	// CAT: 🎨 Pass 3 Filter Toggles
+	// DESC: Master activation amount for the aberration and lens distortions.
+	uniform float u_aberration_strength : hint_range(0.0, 0.1, 0.001) = 0.0;
+	// DESC: Curvature barrel factor for simulating glass camera lenses.
+	uniform float u_lens_barrel : hint_range(-1.0, 1.0, 0.01) = 0.0;
+	// DESC: Isolate high-luminosity spatial zones for organic blur bloom fields.
+	uniform float u_edge_thickness : hint_range(0.1, 3.0, 0.1) = 1.0;
+	// DESC: Sharpness threshold for boundary detection loops.
+	uniform float u_edge_glow : hint_range(0.0, 5.0, 0.1) = 0.0;
+	// DESC: Structural heat haze shimmering velocity factor.
+	uniform float u_aura_shimmer : hint_range(0.0, 5.0, 0.1) = 0.0;
+	// DESC: Radial boundary diffusion scope for high hotspot hotspots.
+	uniform float u_aura_bleed : hint_range(0.1, 2.0, 0.05) = 0.5;
+
+	// CAT: 🎨 Aesthetics & Tinting
+	// DESC: Main coloring vector array layer target tint.
+	uniform vec4 u_pattern_color : source_color = vec4(0.1, 0.7, 0.9, 1.0);
+	// DESC: Customizable color picker target slot for negative space voids.
+	uniform vec4 u_background_color : source_color = vec4(0.02, 0.02, 0.05, 1.0);
+
+	// =========================================================================
+	// MATHEMATICAL CORE UTILITIES
+	// =========================================================================
+
+	float hash2d(vec2 p) { 
+		return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); 
+	}
+
+	float value_noise(vec2 p) {
+		vec2 i = floor(p); vec2 f = fract(p);
+		vec2 u = f * f * (3.0 - 2.0 * f);
+		return mix(mix(hash2d(i + vec2(0.0, 0.0)), hash2d(i + vec2(1.0, 0.0)), u.x),
+				   mix(hash2d(i + vec2(0.0, 1.0)), hash2d(i + vec2(1.0, 1.0)), u.x), u.y);
+	}
+
+	float fbm(vec2 p) {
+		float value = 0.0; float amplitude = 0.5; float frequency = 1.0;
+		for (int i = 0; i < 4; i++) {
+			value += amplitude * value_noise(p * frequency);
+			frequency *= 2.0; amplitude *= 0.5;
+		}
+		return value;
+	}
+
+	mat2 rotate2d(float angle) {
+		return mat2(vec2(cos(angle), -sin(angle)), vec2(sin(angle), cos(angle)));
+	}
+
+	vec2 voronoi_random2(vec2 p) {
+		return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))) * 43758.5453);
+	}
+
+	float evaluate_gyroid(vec3 p) {
+		return sin(p.x) * cos(p.y) + sin(p.y) * cos(p.z) + sin(p.z) * cos(p.x);
+	}
+
+	float draw_truchet_arcs(vec2 cell_uv, float cell_seed) {
+		if (cell_seed > 0.5) {
+			cell_uv.x = 1.0 - cell_uv.x;
+		}
+		float dist_corner_tl = length(cell_uv);
+		float dist_corner_br = length(cell_uv - vec2(1.0));
+		float arc_mask = min(abs(dist_corner_tl - 0.5), abs(dist_corner_br - 0.5));
+		return smoothstep(u_truchet_thickness, u_truchet_thickness - 0.01, arc_mask);
+	}
+	// =========================================================================
+	// INTERMEDIATE PROCEDURAL EVALUATION PIPELINE
+	// =========================================================================
+
+	float evaluate_base_pipeline(vec2 uv_coords, float clock) {
+		vec2 st = (uv_coords - 0.5) * u_global_scale;
+		float final_intensity = 0.0;
+		
+		if (int(u_render_mode) == 0) {
+			vec2 q = vec2(fbm(st + vec2(clock * 0.2)), fbm(st + vec2(5.2, 1.3) + vec2(clock * 0.15)));
+			vec2 r = vec2(fbm(st + 1.1 * (rotate2d(0.5) * q) + vec2(1.7, 9.2) + vec2(clock * 0.3)), 
+						  fbm(st + 1.1 * (rotate2d(0.5) * q) + vec2(8.3, 2.8) + vec2(clock * 0.05)));
+			final_intensity = fbm(st + 1.1 * r);
+		}
+		else if (int(u_render_mode) == 1) {
+			vec2 i_st = floor(st);
+			vec2 f_st = fract(st);
+			float m_dist = 8.0;
+			for (int y = -1; y <= 1; y++) {
+				for (int x = -1; x <= 1; x++) {
+					vec2 neighbor = vec2(float(x), float(y));
+					vec2 point = voronoi_random2(i_st + neighbor);
+					point = 0.5 + 0.5 * sin(clock * 2.0 + 6.2831 * point);
+					vec2 diff = neighbor + point - f_st;
+					m_dist = min(m_dist, length(diff));
+				}
+			}
+			final_intensity = pow(1.0 - m_dist, 2.0);
+		}
+		else if (int(u_render_mode) == 2) {
+			float z_slice = u_time * u_gyroid_depth_speed;
+			vec3 p3d = vec3(st.x, st.y, z_slice);
+			float gyroid_val = evaluate_gyroid(p3d);
+			final_intensity = abs(gyroid_val);
+			final_intensity = smoothstep(0.0, u_gyroid_sharpness, 1.0 - final_intensity);
+		}
+		else if (int(u_render_mode) == 3) {
+			float wave_a = sin(st.x * u_rd_frequency + clock) * cos(st.y * u_rd_frequency - clock);
+			float wave_b = sin(st.y * (u_rd_frequency * 1.5) + clock * 1.3) * cos(st.x * (u_rd_frequency * 0.7) + clock);
+			float combined_waves = (wave_a + wave_b) * 0.5;
+			final_intensity = smoothstep(-0.2, 0.2, combined_waves);
+			final_intensity = pow(final_intensity, u_rd_feedback);
+		}
+		else if (int(u_render_mode) == 4) {
+			vec2 cell_index = floor(st);
+			vec2 cell_local = fract(st);
+			float cell_random_seed = hash2d(cell_index);
+			final_intensity = draw_truchet_arcs(cell_local, cell_random_seed);
+		}
+		return final_intensity;
+	}
+
+	// =========================================================================
+	// FRAGMENT STACK RUNTIME LOOP
+	// =========================================================================
+
+	void fragment() {
+		vec2 worked_uv = UV;
+		float time_clock = u_time * u_global_speed;
+		
+		if (abs(u_lens_barrel) > 0.001) {
+			vec2 lens_st = worked_uv - 0.5;
+			float r2 = dot(lens_st, lens_st);
+			worked_uv = 0.5 + lens_st * (1.0 + r2 * u_lens_barrel);
+		}
+
+		// --- PASS 2: GEOMETRIC WARPING TRANSFORMS ---
+		if (int(u_warp_mode) == 1) {
+			vec2 z = (worked_uv - 0.5) * 2.0;
+			float r2 = dot(z, z);
+			float d = max(0.001, 1.0 - (r2 * u_poincare_strength / (u_poincare_radius * u_poincare_radius)));
+			worked_uv = 0.5 + (z / d) * 0.5;
+		}
+		else if (int(u_warp_mode) == 2) {
+			vec2 z = (worked_uv - 0.5) * 2.0;
+			float r = max(0.0001, length(z));
+			float theta = atan(z.y, z.x);
+			vec2 log_polar = vec2(log(r), theta);
+			log_polar.x += u_time * u_global_speed * u_mobius_zoom;
+			log_polar.y += log_polar.x * u_mobius_twist;
+			worked_uv = 0.5 + vec2(exp(log_polar.x) * cos(log_polar.y), exp(log_polar.x) * sin(log_polar.y)) * 0.25;
+		}
+		else if (int(u_warp_mode) == 3) {
+			vec2 z = worked_uv - 0.5;
+			for (int i = 0; i < 8; i++) {
+				if (float(i) >= u_fold_iterations) break;
+				z = abs(z);
+				z = rotate2d(u_fold_rotation) * z;
+				z -= vec2(0.15);
+			}
+			worked_uv = z + 0.5;
+		}
+		// --- INTEGRATED GENERATIVE RENDERING ENGINE SAMPLER ---
+		float intensity_center = evaluate_base_pipeline(worked_uv, time_clock);
+		
+		vec4 raw_color;
+		if (u_aberration_strength > 0.001) {
+			vec2 d_dir = worked_uv - 0.5;
+			float intensity_r = evaluate_base_pipeline(worked_uv - d_dir * u_aberration_strength, time_clock);
+			float intensity_g = intensity_center;
+			float intensity_r_b = evaluate_base_pipeline(worked_uv + d_dir * u_aberration_strength, time_clock);
+			raw_color = vec4(intensity_r, intensity_g, intensity_r_b, 1.0);
+		} else {
+			raw_color = vec4(vec3(intensity_center), 1.0);
+		}
+
+		vec4 final_color = mix(u_background_color, u_pattern_color, raw_color.r);
+		final_color *= (raw_color.r * 0.5 + 0.8);
+
+		// --- PASS 3: FINISHING POST-PROCESS COSMETICS ---
+		if (u_edge_glow > 0.001) {
+			float step_val = u_edge_thickness / 512.0;
+			float l_left  = evaluate_base_pipeline(worked_uv + vec2(-step_val, 0.0), time_clock);
+			float l_right = evaluate_base_pipeline(worked_uv + vec2(step_val, 0.0), time_clock);
+			float l_up    = evaluate_base_pipeline(worked_uv + vec2(0.0, -step_val), time_clock);
+			float l_down  = evaluate_base_pipeline(worked_uv + vec2(0.0, step_val), time_clock);
+			
+			float edge_intensity = abs(l_left - l_right) + abs(l_up - l_down);
+			vec3 glowing_wire = u_pattern_color.rgb * smoothstep(0.1, 0.5, edge_intensity) * u_edge_glow;
+			final_color.rgb += glowing_wire;
+		}
+
+		if (u_aura_shimmer > 0.001) {
+			float l_center = dot(final_color.rgb, vec3(0.299, 0.587, 0.114));
+			if (l_center > 0.4) {
+				float dist_c = length(UV - 0.5);
+				float pulse = sin(u_time * u_aura_shimmer + dist_c * u_rd_frequency) * 0.5 + 0.5;
+				float aura_mask = smoothstep(u_aura_bleed + 0.2, u_aura_bleed, dist_c) * (l_center - 0.4);
+				final_color.rgb += u_pattern_color.rgb * pulse * aura_mask * 0.5;
+			}
+		}
+
+		COLOR = vec4(final_color.rgb, final_color.a);
+	}
+	\"\"\"
+	
+	# =========================================================================
+	# HARDWARE DICTIONARY COMPILATION & VIEWPORT PIPELINE BINDINGS
+	# =========================================================================
+	pass1_library[\"Master Pipeline\"] = master_shader_code
+	pass2_library[\"Master Pipeline\"] = master_shader_code
+	pass3_library[\"Master Pipeline\"] = master_shader_code
+	
+	pass1_library[\"None Selected\"] = PASSTHROUGH_SHADER_CODE
+	pass2_library[\"None Selected\"] = PASSTHROUGH_SHADER_CODE
+	pass3_library[\"None Selected\"] = PASSTHROUGH_SHADER_CODE
+
+	var s1 = Shader.new()
+	s1.code = master_shader_code
+	var s2 = Shader.new()
+	s2.code = PASSTHROUGH_SHADER_CODE
+	var s3 = Shader.new()
+	s3.code = PASSTHROUGH_SHADER_CODE
+	
+	pass1_material.shader = s1
+	pass2_material.shader = s2
+	pass3_material.shader = s3
+	
+	pass2_material.set_shader_parameter(\"u_pattern_texture\", pass1_viewport.get_texture())
+	pass3_material.set_shader_parameter(\"u_pattern_texture\", pass2_viewport.get_texture())
+	
+	control_panel.load_shader_source(s1.code)
+
+	
+	
+func _on_global_factory_reset_pressed() -> void:
+	if not control_panel or control_panel.parsed_uniforms.is_empty(): return
+	print(\"⚠️ Master Reset: Wiping current focused layer uniforms to baseline default values.\")
+	
+	for u in control_panel.parsed_uniforms:
+		var u_name = u[\"name\"]
+		var u_type = u[\"type\"]
+		
+		# --- PASS 1: GENERATIVE MODE & SPATIAL ENGINE DEFAULTS ---
+		if u_name == \"u_render_mode\": control_panel.uniform_values[u_name] = 0.0
+		elif u_name == \"u_global_scale\": control_panel.uniform_values[u_name] = 4.0
+		elif u_name == \"u_global_speed\": control_panel.uniform_values[u_name] = 0.4
+		
+		# --- GYROID QUANTUM FOAM REGISTRY ---
+		elif u_name == \"u_gyroid_depth_speed\": control_panel.uniform_values[u_name] = 0.5
+		elif u_name == \"u_gyroid_sharpness\": control_panel.uniform_values[u_name] = 1.5
+		
+		# --- REACTION-DIFFUSION MACHINE REGISTRY ---
+		elif u_name == \"u_rd_frequency\": control_panel.uniform_values[u_name] = 12.0
+		elif u_name == \"u_rd_feedback\": control_panel.uniform_values[u_name] = 3.0
+		
+		# --- TRUCHET TILING LABYRINTH REGISTRY ---
+		elif u_name == \"u_truchet_thickness\": control_panel.uniform_values[u_name] = 0.08
+		
+		# --- PASS 2: GEOMETRIC DISTORTION MODE REGISTRY ---
+		elif u_name == \"u_warp_mode\": control_panel.uniform_values[u_name] = 0.0
+		elif u_name == \"u_poincare_strength\": control_panel.uniform_values[u_name] = 0.5
+		elif u_name == \"u_poincare_radius\": control_panel.uniform_values[u_name] = 0.9
+		elif u_name == \"u_mobius_twist\": control_panel.uniform_values[u_name] = 0.0
+		elif u_name == \"u_mobius_zoom\": control_panel.uniform_values[u_name] = 1.0
+		elif u_name == \"u_fold_iterations\": control_panel.uniform_values[u_name] = 4.0
+		elif u_name == \"u_fold_rotation\": control_panel.uniform_values[u_name] = 0.0
+		
+		# --- PASS 3: POST-PROCESS FILTER REGISTRY ---
+		elif u_name == \"u_aberration_strength\": control_panel.uniform_values[u_name] = 0.0
+		elif u_name == \"u_lens_barrel\": control_panel.uniform_values[u_name] = 0.0
+		elif u_name == \"u_edge_thickness\": control_panel.uniform_values[u_name] = 1.0
+		elif u_name == \"u_edge_glow\": control_panel.uniform_values[u_name] = 0.0
+		elif u_name == \"u_aura_shimmer\": control_panel.uniform_values[u_name] = 0.0
+		elif u_name == \"u_aura_bleed\": control_panel.uniform_values[u_name] = 0.5
+		
+		# --- HARDCODED FALLBACK ARTIFACT COMPATIBILITY CLUSTERS ---
+		elif u_name == \"u_warp_frequency\": control_panel.uniform_values[u_name] = Vector2(2.5, 2.5)
+		elif u_name == \"u_cell_scale\": control_panel.uniform_values[u_name] = 4.0
+		elif u_name == \"u_cell_mutation\": control_panel.uniform_values[u_name] = 1.0
+		elif u_name == \"u_nuclei_speed\": control_panel.uniform_values[u_name] = 0.8
+		elif u_name == \"u_border_sharpness\": control_panel.uniform_values[u_name] = 2.0
+		
+		# --- GENERIC DATA-TYPE CONVERSION SAFEGUARDS ---
+		elif u_type == \"float\": control_panel.uniform_values[u_name] = 0.0 
+		elif u_type == \"vec2\": control_panel.uniform_values[u_name] = Vector2(0.0, 0.0)
+		elif u_type == \"vec4\" and u_name == \"u_background_color\": 
+			control_panel.uniform_values[u_name] = Color(0.02, 0.02, 0.05, 1.0)
+		elif u_type == \"vec4\" and u_name == \"u_pattern_color\":
+			control_panel.uniform_values[u_name] = Color(0.1, 0.7, 0.9, 1.0)
+		elif u_type == \"vec4\": control_panel.uniform_values[u_name] = Color.CYAN
+		
+		# --- ACTIVE LAYER GPU MEMORY MATERIAL SYNC BINDINGS ---
+		if active_shader_layer == 0 and pass1_material:
+			pass1_material.set_shader_parameter(u_name, control_panel.uniform_values[u_name])
+		elif active_shader_layer == 1 and pass2_material:
+			pass2_material.set_shader_parameter(u_name, control_panel.uniform_values[u_name])
+		elif active_shader_layer == 2 and pass3_material:
+			pass3_material.set_shader_parameter(u_name, control_panel.uniform_values[u_name])
+			
+	# Update color picker widget node memory if currently open in UI space
+	if control_panel.active_color_picker:
+		var p_name = control_panel.parsed_uniforms[control_panel.active_index][\"name\"]
+		if control_panel.uniform_values.has(p_name):
+			control_panel.active_color_picker.color = control_panel.uniform_values[p_name]
+			
+	control_panel.update_status_readout()
+"
 
 [node name="main" type="VBoxContainer" unique_id=478646852]
 anchors_preset = 15
@@ -9,4 +903,4 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 alignment = 1
-script = ExtResource("1_ig7tw")
+script = SubResource("GDScript_7dm0k")
