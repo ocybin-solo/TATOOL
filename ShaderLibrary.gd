@@ -350,10 +350,15 @@ func global_uniforms(records: Array) -> Array:
 # STARTER RECIPES
 # =========================================================================
 func _register_builtin_recipes() -> void:
-	_register("fbm", PASS_PATTERN, "DOMAIN-WARP FBM NOISE", SRC_FBM, false)
+	_register("fbm_static", PASS_PATTERN, "DOMAIN-WARP: LAYERED MIX", SRC_FBM, false)
+	_register("fbm_cosine", PASS_PATTERN, "DOMAIN-WARP: COSINE PALETTE", SRC_FBM_COSINE, false)
+	_register("fbm_chrono", PASS_PATTERN, "DOMAIN-WARP: CHRONO MORPH", SRC_FBM_CHRONO, false)
+	_register("fbm_cyber", PASS_PATTERN, "DOMAIN-WARP: CYBER VEINS", SRC_FBM_CYBER, false) 
 	_register("kaleidoscope", PASS_WARP, "KALEIDOSCOPE REFLECTION", SRC_KALEIDOSCOPE, true)
 	_register("swirl", PASS_WARP, "RADIAL SWIRL", SRC_SWIRL, true)
 	_register("edge_glow", PASS_FILTER, "ANALOG EDGE GLOW", SRC_EDGE_GLOW, false)
+
+
 
 
 const SRC_FBM: String = """
@@ -384,7 +389,7 @@ float fbm_octaves(vec2 p) {
 	}
 	return value;
 }
-vec4 fx_fbm(vec2 uv) {
+vec4 fx_fbm_static(vec2 uv) {
 	vec2 st = uv * u_warp_frequency;
 	float scaled_time = u_time * u_flow_speed;
 	
@@ -404,6 +409,152 @@ vec4 fx_fbm(vec2 uv) {
 	vec4 final_mix = mix(dynamic_color, u_pattern_color, final_field_math);
 	
 	// Maintain your original brightness multiplier shading curve
+	return final_mix * (final_field_math * 1.5 + 0.3);
+}
+"""
+const SRC_FBM_COSINE: String = """
+uniform vec2 u_warp_frequency = vec2(2.5, 2.5); // @label Warp Frequency | @min 0.1 | @max 12 | @sens 0.05
+uniform float u_warp_strength = 1.1; // @label Warp Strength | @min 0 | @max 4 | @sens 0.05
+uniform float u_noise_detail = 4.0; // @label Noise Detail | @min 1 | @max 5 | @sens 1
+uniform float u_flow_speed = 0.4; // @label Flow Speed | @min 0 | @max 3 | @sens 0.05
+uniform float u_palette_frequency = 1.0; // @label Color Density | @min 0.2 | @max 5.0 | @sens 0.05
+
+uniform vec4 u_color_a : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label Wave Center | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_b : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label Wave Amplitude | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_c : source_color = vec4(1.0, 1.0, 1.0, 1.0); // @label Wave Frequency | @min 0 | @max 2 | @sens 0.02
+uniform vec4 u_color_d : source_color = vec4(0.0, 0.33, 0.67, 1.0); // @label Wave Phase | @min 0 | @max 1 | @sens 0.02
+
+float fbm_hash2d(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
+float fbm_value_noise(vec2 p) {
+	vec2 i = floor(p); vec2 f = fract(p);
+	vec2 u = f * f * (3.0 - 2.0 * f);
+	return mix(mix(fbm_hash2d(i + vec2(0.0, 0.0)), fbm_hash2d(i + vec2(1.0, 0.0)), u.x),
+			   mix(fbm_hash2d(i + vec2(0.0, 1.0)), fbm_hash2d(i + vec2(1.0, 1.0)), u.x), u.y);
+}
+float fbm_octaves(vec2 p) {
+	float value = 0.0; float amplitude = 0.5; float frequency = 1.0;
+	for (int i = 0; i < 5; i++) {
+		if (float(i) >= u_noise_detail) break;
+		value += amplitude * fbm_value_noise(p * frequency);
+		frequency *= 2.0; amplitude *= 0.5;
+	}
+	return value;
+}
+vec4 fx_fbm_cosine(vec2 uv) {
+	vec2 st = uv * u_warp_frequency;
+	float scaled_time = u_time * u_flow_speed;
+	vec2 q = vec2(fbm_octaves(st + vec2(scaled_time * 0.2)), fbm_octaves(st + vec2(5.2, 1.3) + vec2(scaled_time * 0.15)));
+	vec2 r = vec2(fbm_octaves(st + u_warp_strength * q + vec2(1.7, 9.2) + vec2(scaled_time * 0.3)), fbm_octaves(st + u_warp_strength * q + vec2(8.3, 2.8) + vec2(scaled_time * 0.05)));
+	float final_field_math = fbm_octaves(st + u_warp_strength * r);
+	
+	// Drive the cyclical cosine phase using a mix of the field map and the structural stretch
+	float t = (final_field_math + length(q) * 0.3) * u_palette_frequency;
+	vec3 cos_color = u_color_a.rgb + u_color_b.rgb * cos(6.28318 * (u_color_c.rgb * t + u_color_d.rgb));
+	
+	return vec4(cos_color, 1.0) * (final_field_math * 1.5 + 0.3);
+}
+"""
+
+const SRC_FBM_CYBER: String = """
+uniform vec2 u_warp_frequency = vec2(2.5, 2.5); // @label Warp Frequency | @min 0.1 | @max 12 | @sens 0.05
+uniform float u_warp_strength = 1.1; // @label Warp Strength | @min 0 | @max 4 | @sens 0.05
+uniform float u_noise_detail = 4.0; // @label Noise Detail | @min 1 | @max 5 | @sens 1
+uniform float u_flow_speed = 0.4; // @label Flow Speed | @min 0 | @max 3 | @sens 0.05
+uniform float u_vein_density = 12.0; // @label Vein Density | @min 4 | @max 30 | @sens 0.5
+uniform float u_glow_sharpness = 0.85; // @label Glow Sharpness | @min 0.5 | @max 0.99 | @sens 0.01
+
+uniform vec4 u_color_base : source_color = vec4(0.01, 0.01, 0.03, 1.0); // @label Background Color | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_warp_q : source_color = vec4(0.05, 0.0, 0.15, 1.0); // @label Nebula Tint | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_pattern_color : source_color = vec4(0.0, 1.0, 0.8, 1.0); // @label Neon Vein Color | @min 0 | @max 1 | @sens 0.02
+
+float fbm_hash2d(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
+float fbm_value_noise(vec2 p) {
+	vec2 i = floor(p); vec2 f = fract(p);
+	vec2 u = f * f * (3.0 - 2.0 * f);
+	return mix(mix(fbm_hash2d(i + vec2(0.0, 0.0)), fbm_hash2d(i + vec2(1.0, 0.0)), u.x),
+			   mix(fbm_hash2d(i + vec2(0.0, 1.0)), fbm_hash2d(i + vec2(1.0, 1.0)), u.x), u.y);
+}
+float fbm_octaves(vec2 p) {
+	float value = 0.0; float amplitude = 0.5; float frequency = 1.0;
+	for (int i = 0; i < 5; i++) {
+		if (float(i) >= u_noise_detail) break;
+		value += amplitude * fbm_value_noise(p * frequency);
+		frequency *= 2.0; amplitude *= 0.5;
+	}
+	return value;
+}
+vec4 fx_fbm_cyber(vec2 uv) {
+	vec2 st = uv * u_warp_frequency;
+	float scaled_time = u_time * u_flow_speed;
+	
+	vec2 q = vec2(fbm_octaves(st + vec2(scaled_time * 0.2)), fbm_octaves(st + vec2(5.2, 1.3) + vec2(scaled_time * 0.15)));
+	vec2 r = vec2(fbm_octaves(st + u_warp_strength * q + vec2(1.7, 9.2) + vec2(scaled_time * 0.3)), fbm_octaves(st + u_warp_strength * q + vec2(8.3, 2.8) + vec2(scaled_time * 0.05)));
+	float final_field_math = fbm_octaves(st + u_warp_strength * r);
+	
+	// Create sharp electrical rings using a high-frequency sine wave driven by time
+	float pulse = sin(final_field_math * u_vein_density + u_time * 0.5) * 0.5 + 0.5;
+	
+	// Smoothstep clamps it into highly defined glowing neon borders
+	float veins = smoothstep(u_glow_sharpness, u_glow_sharpness + 0.08, pulse);
+	
+	// Deep cosmic background mix
+	vec4 dynamic_bg = mix(u_color_base, u_color_warp_q, final_field_math);
+	
+	// Make veins brighter in areas where space is stretched heavily by r
+	float vein_mask = veins * (length(r) * 1.2 + 0.2);
+	vec4 final_mix = mix(dynamic_bg, u_pattern_color, clamp(vein_mask, 0.0, 1.0));
+	
+	// Subtle background topography lighting
+	return final_mix + (final_field_math * u_color_warp_q * 0.3);
+}
+"""
+
+
+const SRC_FBM_CHRONO: String = """
+uniform vec2 u_warp_frequency = vec2(2.5, 2.5); // @label Warp Frequency | @min 0.1 | @max 12 | @sens 0.05
+uniform float u_warp_strength = 1.1; // @label Warp Strength | @min 0 | @max 4 | @sens 0.05
+uniform float u_noise_detail = 4.0; // @label Noise Detail | @min 1 | @max 5 | @sens 1
+uniform float u_flow_speed = 0.4; // @label Flow Speed | @min 0 | @max 3 | @sens 0.05
+uniform float u_color_morph_speed = 0.5; // @label Color Morph Speed | @min 0 | @max 4 | @sens 0.05
+
+uniform vec4 u_color_base : source_color = vec4(0.02, 0.02, 0.05, 1.0); // @label Base Color | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_warp_q : source_color = vec4(0.12, 0.0, 0.22, 1.0); // @label Distortion Color A | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_warp_r : source_color = vec4(0.0, 0.5, 0.5, 1.0); // @label Distortion Color B | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_pattern_color : source_color = vec4(0.1, 0.7, 0.9, 1.0); // @label Highlight Color | @min 0 | @max 1 | @sens 0.02
+
+float fbm_hash2d(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
+float fbm_value_noise(vec2 p) {
+	vec2 i = floor(p); vec2 f = fract(p);
+	vec2 u = f * f * (3.0 - 2.0 * f);
+	return mix(mix(fbm_hash2d(i + vec2(0.0, 0.0)), fbm_hash2d(i + vec2(1.0, 0.0)), u.x),
+			   mix(fbm_hash2d(i + vec2(0.0, 1.0)), fbm_hash2d(i + vec2(1.0, 1.0)), u.x), u.y);
+}
+float fbm_octaves(vec2 p) {
+	float value = 0.0; float amplitude = 0.5; float frequency = 1.0;
+	for (int i = 0; i < 5; i++) {
+		if (float(i) >= u_noise_detail) break;
+		value += amplitude * fbm_value_noise(p * frequency);
+		frequency *= 2.0; amplitude *= 0.5;
+	}
+	return value;
+}
+vec4 fx_fbm_chrono(vec2 uv) {
+	vec2 st = uv * u_warp_frequency;
+	float scaled_time = u_time * u_flow_speed;
+	vec2 q = vec2(fbm_octaves(st + vec2(scaled_time * 0.2)), fbm_octaves(st + vec2(5.2, 1.3) + vec2(scaled_time * 0.15)));
+	vec2 r = vec2(fbm_octaves(st + u_warp_strength * q + vec2(1.7, 9.2) + vec2(scaled_time * 0.3)), fbm_octaves(st + u_warp_strength * q + vec2(8.3, 2.8) + vec2(scaled_time * 0.05)));
+	float final_field_math = fbm_octaves(st + u_warp_strength * r);
+	
+	// Cycle colors over time independently of pattern flow
+	float time_shift = sin(u_time * u_color_morph_speed) * 0.5 + 0.5;
+	vec4 evolving_base = mix(u_color_base, u_color_warp_q, time_shift);
+	vec4 evolving_warp = mix(u_color_warp_r, u_color_base, time_shift);
+	
+	vec4 dynamic_color = mix(evolving_base, evolving_warp, clamp(length(q), 0.0, 1.0));
+	float angle_factor = (atan(r.y, r.x) + 3.14159) / 6.28318;
+	dynamic_color = mix(dynamic_color, u_color_warp_r, clamp(angle_factor * length(r), 0.0, 1.0));
+	
+	vec4 final_mix = mix(dynamic_color, u_pattern_color, final_field_math);
 	return final_mix * (final_field_math * 1.5 + 0.3);
 }
 """
