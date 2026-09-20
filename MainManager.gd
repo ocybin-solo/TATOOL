@@ -31,8 +31,7 @@ var active_menu_kind: int = MenuKind.NONE
 var btn_select_pass: Button
 var btn_shader_menu: Button
 var btn_screensaver_stub: Button
-const LABEL_SELECT_PASS_IDLE: String = "🔄 POTATO"
-const LABEL_SHADER_MENU_IDLE: String = "🕹️ SHADER MENU"
+
 
 # --- ONBOARDING BOOT RIBBON ---
 # The actual suppress/release flag lives on control_panel
@@ -222,11 +221,11 @@ func setup_interface_layer() -> void:
 
 	# 🌟 PWR Button on TOP
 	btn_shader_menu = Button.new()
-	btn_shader_menu.text = "⏻\nPWR"
+	btn_shader_menu.text = "⏻\n"
 	btn_shader_menu.custom_minimum_size = Vector2(96, 96)
 	btn_shader_menu.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	btn_shader_menu.add_theme_color_override("font_color", Color.RED)
-	btn_shader_menu.add_theme_font_size_override("font_size", 14)
+	btn_shader_menu.add_theme_font_size_override("font_size", 44)
 	# 🌟 WIRE RE-CONNECTED: Link PWR button to its handler method
 	btn_shader_menu.pressed.connect(_on_shader_menu_button_pressed)
 	utility_trench.add_child(btn_shader_menu)
@@ -238,11 +237,11 @@ func setup_interface_layer() -> void:
 
 	# 🌟 OPT Button on BOTTOM
 	btn_select_pass = Button.new()
-	btn_select_pass.text = "■\nOPT"
+	btn_select_pass.text = "■\n"
 	btn_select_pass.custom_minimum_size = Vector2(96, 96)
 	btn_select_pass.size_flags_vertical = Control.SIZE_SHRINK_END
 	btn_select_pass.add_theme_color_override("font_color", Color.CYAN)
-	btn_select_pass.add_theme_font_size_override("font_size", 14)
+	btn_select_pass.add_theme_font_size_override("font_size", 44)
 	# 🌟 WIRE RE-CONNECTED: Link OPT button to its handler method
 	btn_select_pass.pressed.connect(_on_select_pass_button_pressed)
 	utility_trench.add_child(btn_select_pass)
@@ -366,7 +365,7 @@ func close_select_pass_menu(confirm: bool) -> void:
 
 	is_menu_open = false
 	active_menu_kind = MenuKind.NONE
-	btn_select_pass.text = LABEL_SELECT_PASS_IDLE
+	#btn_select_pass.text = LABEL_SELECT_PASS_IDLE
 	menu_center_host.visible = false
 
 	if select_pass_overlay_panel and is_instance_valid(select_pass_overlay_panel):

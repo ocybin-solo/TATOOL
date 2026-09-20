@@ -84,9 +84,9 @@ func setup_ui_layout() -> void:
 
 	# A Button (✔ ACCEPT)
 	btn_channel = Button.new()
-	btn_channel.text = "✔\n  A  "
+	btn_channel.text = "✔\n"
 	btn_channel.custom_minimum_size = Vector2(96, 96)
-	btn_channel.add_theme_font_size_override("font_size", 13)
+	btn_channel.add_theme_font_size_override("font_size", 44)
 	btn_channel.add_theme_color_override("font_color", Color.GREEN)
 	btn_channel.pressed.connect(_on_action_button_a) # Wired to Accept logic
 	action_row.add_child(btn_channel)
@@ -98,21 +98,21 @@ func setup_ui_layout() -> void:
 
 	# B Button (❌ BACK)
 	btn_sens_left = Button.new()
-	btn_sens_left.text = "❌\n  B  "
+	btn_sens_left.text = "❌\n"
 	btn_sens_left.custom_minimum_size = Vector2(96, 96)
-	btn_sens_left.add_theme_font_size_override("font_size", 13)
+	btn_sens_left.add_theme_font_size_override("font_size", 44)
 	btn_sens_left.add_theme_color_override("font_color", Color.RED)
 	btn_sens_left.pressed.connect(_on_action_button_b) # Wired to Exit/Back logic
 	action_row.add_child(btn_sens_left)
 
 	# THE LEFT SHIFT FILTER: Adding a small layout spacer on the right side of the row 
 	var left_shift_spacer = Control.new()
-	left_shift_spacer.custom_minimum_size = Vector2(24, 0)
+	left_shift_spacer.custom_minimum_size = Vector2(100, 0)
 	action_row.add_child(left_shift_spacer)
 
 	# PUSH DPAD DOWN: Increased vertical separation gap between rows
 	var vertical_spacer = Control.new()
-	vertical_spacer.custom_minimum_size = Vector2(0, 24)
+	vertical_spacer.custom_minimum_size = Vector2(0, 0)
 	chassis_stack.add_child(vertical_spacer)
 
 	# LOW ROW: Singular 3x3 D-Pad Cross Grid
@@ -125,7 +125,7 @@ func setup_ui_layout() -> void:
 	btn_param_up = Button.new()
 	btn_param_up.text = "▲"
 	btn_param_up.custom_minimum_size = Vector2(96, 96)
-	btn_param_up.add_theme_font_size_override("font_size", 20)
+	btn_param_up.add_theme_font_size_override("font_size", 44)
 	btn_param_up.pressed.connect(_on_dpad_up) # Wired to Navigate Up
 	dpad_grid.add_child(btn_param_up)
 	dpad_grid.add_child(Control.new())
@@ -134,7 +134,7 @@ func setup_ui_layout() -> void:
 	btn_channel_prev = Button.new()
 	btn_channel_prev.text = "◄"
 	btn_channel_prev.custom_minimum_size = Vector2(96, 96)
-	btn_channel_prev.add_theme_font_size_override("font_size", 20)
+	btn_channel_prev.add_theme_font_size_override("font_size", 44)
 	btn_channel_prev.pressed.connect(_on_dpad_left) # Wired to Cycle Left
 	dpad_grid.add_child(btn_channel_prev)
 
@@ -148,7 +148,7 @@ func setup_ui_layout() -> void:
 	btn_channel_next = Button.new()
 	btn_channel_next.text = "►"
 	btn_channel_next.custom_minimum_size = Vector2(96, 96)
-	btn_channel_next.add_theme_font_size_override("font_size", 20)
+	btn_channel_next.add_theme_font_size_override("font_size", 44)
 	btn_channel_next.pressed.connect(_on_dpad_right) # Wired to Cycle Right
 	dpad_grid.add_child(btn_channel_next)
 
@@ -157,7 +157,7 @@ func setup_ui_layout() -> void:
 	btn_param_down = Button.new()
 	btn_param_down.text = "▼"
 	btn_param_down.custom_minimum_size = Vector2(96, 96)
-	btn_param_down.add_theme_font_size_override("font_size", 20)
+	btn_param_down.add_theme_font_size_override("font_size", 44)
 	btn_param_down.pressed.connect(_on_dpad_down) # Wired to Navigate Down
 	dpad_grid.add_child(btn_param_down)
 	dpad_grid.add_child(Control.new())
