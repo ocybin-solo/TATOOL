@@ -136,16 +136,28 @@ func _pass_header(pass_index: int) -> String:
 func _template_globals(pass_index: int) -> String:
 	match pass_index:
 		PASS_PATTERN:
-			return "uniform float u_rotation_speed = 0.0; // @label Rotation Speed | @min -2 | @max 2 | @sens 0.05 | @global"
+			var g1: String = "uniform float u_global_zoom = 1.0; // @label Master Pattern Scale | @min 0.2 | @max 5.0 | @sens 0.05 | @global\n"
+			g1 += "uniform vec2 u_global_offset = vec2(0.0, 0.0); // @label Master Pan | @min -2.0 | @max 2.0 | @sens 0.01 | @global\n"
+			g1 += "uniform float u_rotation_speed = 0.0; // @label Rotation Speed | @min -2 | @max 2 | @sens 0.05 | @global"
+			return g1
+		PASS_WARP:
+			var g2: String = "uniform float u_warp_master_mix = 1.0; // @label Warp Dry/Wet Mix | @min 0.0 | @max 1.0 | @sens 0.01 | @global\n"
+			g2 += "uniform float u_global_speed_mod = 1.0; // @label Master Animation Speed | @min 0.0 | @max 3.0 | @sens 0.05 | @global"
+			return g2
+		PASS_FILTER:
+			var g3: String = "uniform float u_master_brightness = 1.0; // @label Master Brightness | @min 0.5 | @max 2.0 | @sens 0.02 | @global\n"
+			g3 += "uniform float u_master_saturation = 1.0; // @label Master Saturation | @min 0.0 | @max 2.0 | @sens 0.02 | @global\n"
+			g3 += "uniform float u_master_rotation = 0.0; // @label Master Canvas Spin | @min -3.1416 | @max 3.1416 | @sens 0.05 | @global"
+			return g3
 	return ""
-
 
 func _pass_fragment(pass_index: int, ids: Array) -> String:
 	var f: String = ""
 	match pass_index:
 		PASS_PATTERN:
 			f += "void fragment() {\n"
-			f += "\tvec2 uv = UV - 0.5;\n"
+			f += "\t// Apply universal Pan and Zoom globals to space first\n"
+			f += "\tvec2 uv = (UV - 0.5) * u_global_zoom + u_global_offset;\n"
 			f += "\tfloat ang = u_time * u_rotation_speed;\n"
 			f += "\tuv = vec2(cos(ang) * uv.x - sin(ang) * uv.y, sin(ang) * uv.x + cos(ang) * uv.y) + 0.5;\n"
 			if ids.is_empty():
@@ -153,24 +165,46 @@ func _pass_fragment(pass_index: int, ids: Array) -> String:
 			else:
 				f += "\tCOLOR = fx_%s(uv);\n" % ids[0]
 			f += "}\n"
+			
 		PASS_WARP:
 			f += "vec2 tatool_mirror(vec2 x) {\n"
 			f += "\treturn abs(mod(x + 1.0, 2.0) - 1.0);\n"
 			f += "}\n\n"
 			f += "void fragment() {\n"
+			f += "\tvec2 original_uv = UV;\n"
 			f += "\tvec2 uv = UV;\n"
 			for id in ids:
 				f += "\tuv = fx_%s(uv);\n" % id
-			f += "\tCOLOR = texture(u_pattern_texture, tatool_mirror(uv));\n"
+			f += "\t// Globally blend between unwarped and warped space based on Dry/Wet knob\n"
+			f += "\tvec2 final_uv = mix(original_uv, uv, u_warp_master_mix);\n"
+			f += "\tCOLOR = texture(u_pattern_texture, tatool_mirror(final_uv));\n"
 			f += "}\n"
-		_:
+			
+		PASS_FILTER, _:
 			f += "void fragment() {\n"
+			f += "\t// Universal Master Rotation for the entire incoming viewport\n"
+			f += "\tvec2 rotated_uv = UV - 0.5;\n"
+			f += "\tfloat master_ang = u_master_rotation;\n"
+			f += "\trotated_uv = vec2(cos(master_ang) * rotated_uv.x - sin(master_ang) * rotated_uv.y, sin(master_ang) * rotated_uv.x + cos(master_ang) * rotated_uv.y) + 0.5;\n"
+			f += "\t\n"
+			f += "\tvec4 scene_color;\n"
 			if ids.is_empty():
-				f += "\tCOLOR = texture(u_warped_texture, UV);\n"
+				f += "\tscene_color = texture(u_warped_texture, rotated_uv);\n"
 			else:
-				f += "\tCOLOR = fx_%s(UV);\n" % ids[0]
+				f += "\tscene_color = fx_%s(rotated_uv);\n" % ids
+			
+			f += "\t// Apply Master Brightness Global override\n"
+			f += "\tscene_color.rgb *= u_master_brightness;\n"
+			f += "\t\n"
+			f += "\t// Calculate grayscale luminance for Saturation Global blend\n"
+			f += "\tfloat luma = dot(scene_color.rgb, vec3(0.299, 0.587, 0.114));\n"
+			f += "\tscene_color.rgb = mix(vec3(luma), scene_color.rgb, u_master_saturation);\n"
+			f += "\t\n"
+			f += "\tCOLOR = scene_color;\n"
 			f += "}\n"
+			
 	return f
+
 
 
 func _rename_word(text: String, from_name: String, to_name: String) -> String:
@@ -407,6 +441,37 @@ func _register_builtin_recipes() -> void:
 	_register("halftone_dots", PASS_FILTER, "🎨 HALFTONE DOT MATRIX", SRC_HALFTONE_DOTS, false)
 	_register("ascii_art", PASS_FILTER, "📟 ASCII CHARACTER TERMINAL", SRC_ASCII_ART, false)
 	_register("oil_painting", PASS_FILTER, "🖌️ OIL PAINTING CANVAS", SRC_OIL_PAINTING, false)
+	_register("p3_fisheye_bulb", PASS_FILTER, "FISHEYE BULB LENS", SRC_FISHEYE_BULB, true)
+
+
+
+const SRC_P3_FISHEYE_BULB: String = """
+uniform vec2 u_lens_center = vec2(0.5, 0.5); // @label Bulb Center | @min 0.0 | @max 1.0 | @sens 0.01
+uniform float u_lens_radius = 0.5; // @label Bulb Radius | @min 0.1 | @max 1.5 | @sens 0.02
+uniform float u_lens_power = 1.5; // @label Pinch Intensity | @min 0.1 | @max 4.0 | @sens 0.05
+
+vec2 fx_fisheye_bulb(vec2 uv) {
+	// Calculate the distance vector from the pixel to the center of our bulb lens
+	vec2 p = uv - u_lens_center;
+	float d = length(p);
+	
+	// Check if the current pixel coordinate falls within our lens bubble radius
+	if (d < u_lens_radius) {
+		// Normalize the coordinate space relative to the radius of the bulb
+		float norm_d = d / u_lens_radius;
+		
+		// Run a non-linear exponential warp factor on the normalized radius
+		float warp = pow(norm_d, u_lens_power);
+		
+		// Rescale the vector from the center based on the magnification power curve
+		return u_lens_center + normalize(p) * warp * u_lens_radius;
+	}
+	
+	// If outside the lens boundary, leave the coordinate tracking flat and untouched
+	return uv;
+}
+"""
+
 
 const SRC_OIL_PAINTING: String = """
 uniform float u_brush_radius = 4.0; // @label Brush Stroke Size | @min 1.0 | @max 8.0 | @sens 0.5
@@ -2107,17 +2172,28 @@ const SRC_EDGE_GLOW: String = """
 uniform float u_edge_threshold = 0.15; // @label Edge Threshold | @min 0 | @max 1 | @sens 0.01
 uniform float u_glow_intensity = 2.5; // @label Glow Intensity | @min 0 | @max 8 | @sens 0.1
 uniform vec2 u_step_offset = vec2(0.003, 0.003); // @label Step Offset | @min 0.0005 | @max 0.02 | @sens 0.0005
+uniform float u_cel_bands = 5.0; // @label Cel Shade Bands | @min 2.0 | @max 12.0 | @sens 1.0
+
+vec3 quantize_cel(vec3 color, float bands) {
+	return floor(color * bands) / bands;
+}
 
 vec4 fx_edge_glow(vec2 uv) {
 	vec4 center_color = texture(u_warped_texture, uv);
 	float c = (center_color.r + center_color.g + center_color.b) / 3.0;
+	
 	float left = texture(u_warped_texture, uv - vec2(u_step_offset.x, 0.0)).g;
 	float right = texture(u_warped_texture, uv + vec2(u_step_offset.x, 0.0)).g;
 	float up = texture(u_warped_texture, uv - vec2(0.0, u_step_offset.y)).g;
 	float down = texture(u_warped_texture, uv + vec2(0.0, u_step_offset.y)).g;
+	
 	float edge_delta = abs(c - left) + abs(c - right) + abs(c - up) + abs(c - down);
 	float edge_mask = smoothstep(u_edge_threshold, u_edge_threshold + 0.1, edge_delta);
 	vec3 glowing_borders = center_color.rgb * edge_mask * u_glow_intensity;
-	return vec4(center_color.rgb + glowing_borders, center_color.a);
+	
+	vec3 raw_composite = center_color.rgb + glowing_borders;
+	vec3 cel_shaded = quantize_cel(raw_composite, u_cel_bands);
+	
+	return vec4(cel_shaded, center_color.a);
 }
 """

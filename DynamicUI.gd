@@ -94,23 +94,23 @@ func setup_ui_layout() -> void:
 
 	# A Button (✔ ACCEPT)
 	btn_channel = Button.new()
-	btn_channel.text = "▢"
+	btn_channel.text = "Ⓐ"
 	btn_channel.custom_minimum_size = Vector2(96, 96)
-	btn_channel.add_theme_font_size_override("font_size", 36)
+	btn_channel.add_theme_font_size_override("font_size", 56)
 	btn_channel.add_theme_color_override("font_color", Color.GREEN)
 	btn_channel.pressed.connect(_on_action_button_a) # Wired to Accept logic
 	action_row.add_child(btn_channel)
 
 	# Perfect visual axis alignment gap matching the structural width of the D-pad cross center
 	var button_gap = Control.new()
-	button_gap.custom_minimum_size = Vector2(96, 0)
+	button_gap.custom_minimum_size = Vector2(93, 0)
 	action_row.add_child(button_gap)
 
 	# B Button (❌ BACK)
 	btn_sens_left = Button.new()
-	btn_sens_left.text = "▢"
+	btn_sens_left.text = "Ⓑ"
 	btn_sens_left.custom_minimum_size = Vector2(96, 96)
-	btn_sens_left.add_theme_font_size_override("font_size", 36)
+	btn_sens_left.add_theme_font_size_override("font_size", 56)
 	btn_sens_left.add_theme_color_override("font_color", Color.RED)
 	btn_sens_left.pressed.connect(_on_action_button_b) # Wired to Exit/Back logic
 	action_row.add_child(btn_sens_left)
@@ -122,7 +122,7 @@ func setup_ui_layout() -> void:
 
 	# PUSH DPAD DOWN: Increased vertical separation gap between rows
 	var vertical_spacer = Control.new()
-	vertical_spacer.custom_minimum_size = Vector2(0, 0)
+	vertical_spacer.custom_minimum_size = Vector2(-10, 0)
 	chassis_stack.add_child(vertical_spacer)
 
 	# LOW ROW: Singular 3x3 D-Pad Cross Grid

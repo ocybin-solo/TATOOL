@@ -219,32 +219,33 @@ func setup_interface_layer() -> void:
 	utility_trench.alignment = BoxContainer.ALIGNMENT_CENTER
 	landscape_root.add_child(utility_trench)
 
-	# 🌟 PWR Button on TOP
+
+	# 🌟 OPT Button on BOTTOM
+	btn_select_pass = Button.new()
+	btn_select_pass.text = "📜\n"
+	btn_select_pass.custom_minimum_size = Vector2(96, 96)
+	btn_select_pass.size_flags_vertical = Control.SIZE_SHRINK_END
+	btn_select_pass.add_theme_color_override("font_color", Color.CORNFLOWER_BLUE)
+	btn_select_pass.add_theme_font_size_override("font_size", 36)
+	# 🌟 WIRE RE-CONNECTED: Link OPT button to its handler method
+	btn_select_pass.pressed.connect(_on_select_pass_button_pressed)
+	utility_trench.add_child(btn_select_pass)
+	# Flexible expanding spacer between the two elements
+	var util_spacer = Control.new()
+	util_spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	utility_trench.add_child(util_spacer)
+		# 🌟 PWR Button on TOP
 	btn_shader_menu = Button.new()
 	btn_shader_menu.text = "⚙\n"
 	btn_shader_menu.custom_minimum_size = Vector2(96, 96)
 	btn_shader_menu.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	btn_shader_menu.add_theme_color_override("font_color", Color.GOLD)
-	btn_shader_menu.add_theme_font_size_override("font_size", 44)
+	btn_shader_menu.add_theme_font_size_override("font_size", 36)
 	# 🌟 WIRE RE-CONNECTED: Link PWR button to its handler method
 	btn_shader_menu.pressed.connect(_on_shader_menu_button_pressed)
 	utility_trench.add_child(btn_shader_menu)
 
-	# Flexible expanding spacer between the two elements
-	var util_spacer = Control.new()
-	util_spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	utility_trench.add_child(util_spacer)
 
-	# 🌟 OPT Button on BOTTOM
-	btn_select_pass = Button.new()
-	btn_select_pass.text = "☰\n"
-	btn_select_pass.custom_minimum_size = Vector2(96, 96)
-	btn_select_pass.size_flags_vertical = Control.SIZE_SHRINK_END
-	btn_select_pass.add_theme_color_override("font_color", Color.CORNFLOWER_BLUE)
-	btn_select_pass.add_theme_font_size_override("font_size", 44)
-	# 🌟 WIRE RE-CONNECTED: Link OPT button to its handler method
-	btn_select_pass.pressed.connect(_on_select_pass_button_pressed)
-	utility_trench.add_child(btn_select_pass)
 
 	# RIGHT SIDE CONSOLE CONTROL CHASSIS
 	control_panel = load("res://DynamicUI.gd").new()
