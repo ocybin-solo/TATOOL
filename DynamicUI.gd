@@ -3,12 +3,30 @@ extends VBoxContainer
 
 
 signal uniform_changed(name: String, value: Variant)
-# 🌟 THE FOUR CORE INPUT STATES FOR THE HANDHELD CHASSIS
-enum ControlState { HIDDEN, MENU_NAVIGATION, VECTOR_EXPANSION, VALUE_EDITING }
-var active_state: int = ControlState.HIDDEN # Starts with the menu hidden
+# 🌟 THE SEQUENTIAL HANDHELD 5-TIER ARCHITECTURE ENGINE STATES
+enum ControlState { 
+	HIDDEN, 
+	TIER_1_PASS, 
+	TIER_2_FORMULA,   # New recipe switchboard placeholder layer
+	TIER_3_UNIFORM,   # Old Tier 2 Uniform List
+	TIER_4_PARAMETER, # Old Tier 3 Sub-Channel Axis List
+	TIER_5_TWEAK,     # Old Tier 4 Live Tweak Console Box
+	SYSTEM_MENU
+}
 
-# Focus memory trackers to remember where your cursor was last sitting
-var last_menu_tab_index: int = 0 # 0 = Pass, 1 = Shader, 2 = Param
+var active_state: int = ControlState.HIDDEN
+
+# Cursor focus memory caches to remember selections when popping backwards with Button B
+var last_tier1_index: int = 0  # Remembers focused Pass Layer Row
+var last_tier2_index: int = 0  # Remembers focused Formula/Recipe Row
+var last_tier3_index: int = 0  # Remembers focused Uniform Row (Index 0 = RESET ROW)
+var last_tier4_index: int = 0  # Remembers focused Parameter/Channel Sub-Axis Row
+var last_tier5_row: int = 0    # 0 = VALUE Row, 1 = SENSITIVITY Row
+
+# System Power Menu cursor memory tracker
+var system_menu_index: int = 0 # 0 = BACK, 1 = APP OPTIONS, 2 = EXIT GAME
+
+# FUNCTION END: state_declarations
 
 
 
@@ -149,319 +167,323 @@ func setup_ui_layout() -> void:
 
 
 # Memory String Parser: Walks source strings to capture description tags
-func load_shader_source(shader_code: String) -> void:
+func load_shader_source(source_code: String) -> void:
 	parsed_uniforms.clear()
-	uniform_values.clear()
-	uniform_descriptions.clear()
 	shader_categories.clear()
 	
-	var lines = shader_code.split("\n")
-	var active_cached_desc: String = ""
-	var active_cached_cat: String = ""
+	var lines = source_code.split("\n")
 	
 	for line in lines:
 		var trimmed = line.strip_edges()
-		
-		# 1. Capture category tags
-		if trimmed.begins_with("// CAT:"):
-			active_cached_cat = trimmed.replace("// CAT:", "").strip_edges()
-			continue
-		
-		# 2. Capture description tags
-		if trimmed.begins_with("// DESC:"):
-			active_cached_desc = trimmed.replace("// DESC:", "").strip_edges()
-			continue
+		if trimmed.begins_with("uniform "):
+			var clean_line = trimmed.replace(";", "").replace(":", " ")
+			var tokens = clean_line.split(" ", false)
 			
-		# 3. Match uniform variables
-		if trimmed.contains("uniform"):
-			var regex = RegEx.new()
-			regex.compile("uniform\\s+(float|vec2|vec4|sampler2D)\\s+(\\w+)")
-			var result = regex.search(trimmed)
-			
-			if result:
-				var u_type = result.get_string(1)
-				var u_name = result.get_string(2)
+			if tokens.size() >= 3:
+				var u_type = tokens[1]
+				var u_raw_name = tokens[2]
 				
-				if u_name == "u_time" or u_name == "u_pattern_texture" or u_type == "sampler2D": 
+				# 🌟 AUTOMATED DEFAULT EXTRACTION: Scan for inline code assignments
+				var parsed_default_val: float = 0.0
+				var u_name = u_raw_name
+				
+				if "=" in clean_line:
+					var split_assignment = clean_line.split("=")
+					u_name = split_assignment[0].replace("uniform", "").replace(u_type, "").strip_edges()
+					var raw_assignment_value = split_assignment[1].strip_edges()
+					
+					# Extract numeric components for scalars vs vectors cleanly
+					if u_type == "float":
+						parsed_default_val = float(raw_assignment_value)
+					elif u_type == "vec2" or u_type == "vec4":
+						# Pull the very first component number inside brackets/vec parameters
+						var cleaned_numbers = raw_assignment_value.replace("vec2", "").replace("vec4", "").replace("(", "").replace(")", "").split(",")
+						if cleaned_numbers.size() > 0:
+							parsed_default_val = float(cleaned_numbers[0].strip_edges())
+				
+				# 🛡️ EXCLUSION FILTER: Skip system textures and clock trackers completely
+				if u_name == "u_time" or u_name == "u_pattern_texture" or u_name == "u_warped_texture" or u_type == "sampler2D":
 					continue
 				
-				parsed_uniforms.append({"name": u_name, "type": u_type})
+				# Smart Sensitivity Automation matching based on target variables data architecture
+				var recommended_sens: float = 0.01
+				if u_name == "u_segments": recommended_sens = 1.0
+				elif "speed" in u_name or "frequency" in u_name: recommended_sens = 0.05
 				
-				# Link first discovered variable to the active category block
-				if active_cached_cat != "":
-					if not shader_categories.has(active_cached_cat):
-						shader_categories[active_cached_cat] = u_name
-					active_cached_cat = "" 
-				else:
-					# 🌀 FALLBACK AUTO-CATEGORIZER REGEX ENGINES
-					var target_cat = "🌀 UTILITY / OTHER"
-					var lower_name = u_name.to_lower()
-					
-					var kw_distortion = ["warp", "twist", "wave", "bend", "scroll", "distort", "zoom", "pinch", "offset"]
-					var kw_chromatic = ["color", "hue", "rgb", "fade", "palette", "tint", "bright", "sat", "contrast", "alpha"]
-					var kw_frequency = ["speed", "freq", "time", "scale", "step", "rate", "pulse", "bpm", "length"]
-					
-					for kw in kw_distortion:
-						if lower_name.contains(kw):
-							target_cat = "🎨 DISTORTION"
-							break
-					
-					if target_cat == "🌀 UTILITY / OTHER":
-						for kw in kw_chromatic:
-							if lower_name.contains(kw):
-								target_cat = "🌈 CHROMATIC"
-								break
-								
-					if target_cat == "🌀 UTILITY / OTHER":
-						for kw in kw_frequency:
-							if lower_name.contains(kw):
-								target_cat = "⚡ FREQUENCY"
-								break
-								
-					# Register fallback category hook safely
-					if not shader_categories.has(target_cat):
-						shader_categories[target_cat] = u_name
+				# Build out our comprehensive 5-Tier token blueprint card array
+				var uniform_data = {
+					"name": u_name,
+					"type": u_type,
+					"display_name": u_name.replace("u_", "").replace("_", " ").to_upper(),
+					"default_value": parsed_default_val,
+					"default_sensitivity": recommended_sens
+				}
 				
-				# Link descriptions
-				if active_cached_desc != "":
-					uniform_descriptions[u_name] = active_cached_desc
-					active_cached_desc = ""
-				else:
-					uniform_descriptions[u_name] = "Analog variable adjustment channel link."
+				parsed_uniforms.append(uniform_data)
 				
-				# Populate defaults
-				if u_name == "u_warp_frequency": uniform_values[u_name] = Vector2(2.5, 2.5)
-				elif u_type == "float": uniform_values[u_name] = 1.0
-				elif u_type == "vec2": uniform_values[u_name] = Vector2(5.0, 5.0)
-				elif u_type == "vec4": uniform_values[u_name] = Color.CYAN
-				
-	active_index = 0
-	active_sub_channel = 0
-	update_status_readout()
-	
-#func set_dpad_locked(is_locked: bool) -> void:
-	## Strict Input Isolation: flip every physical D-pad button inert ## 
-	## the instant a menu overlay opens. Menu nav from here on is
-	## driven only by the overlay's own ▲/▼ buttons.
-	#for btn in [btn_param_up, btn_param_down, btn_channel_prev, btn_channel_next,
-			#btn_value_up, btn_value_down, btn_sens_left, btn_sens_right]:
-		#if btn:
-			#btn.disabled = is_locked
+				var category_label = "PARAMETERS"
+				if not shader_categories.has(category_label):
+					shader_categories[category_label] = u_name
+
+	print("🔌 GLSL Auto-Parser Cached %d Uniforms with Default Reference Baselines!" % parsed_uniforms.size())
+
+# FUNCTION END: load_shader_source
 func _on_dpad_up() -> void:
 	var main_manager = get_tree().get_first_node_in_group("main_manager")
-	if main_manager and main_manager.is_menu_open:
-		if main_manager.active_menu_kind == main_manager.MenuKind.SELECT_PASS:
-			main_manager._step_select_pass_highlight(-1)
-		elif main_manager.active_menu_kind == main_manager.MenuKind.SHADER_MENU:
-			main_manager._step_fast_travel_selection(-1)
-		return
-		
-	if parsed_uniforms.is_empty(): return
-	active_index = posmod(active_index - 1, parsed_uniforms.size())
-	active_sub_channel = 0
-	update_status_readout()
+	if not main_manager or active_state == ControlState.HIDDEN: return
+	
+	match active_state:
+		ControlState.SYSTEM_MENU:
+			system_menu_index = posmod(system_menu_index - 1, 3)
+			main_manager.redraw_system_power_menu()
+		ControlState.TIER_1_PASS:
+			if main_manager.active_menu_kind == main_manager.MenuKind.SELECT_PASS:
+				main_manager._step_select_pass_highlight(-1)
+		ControlState.TIER_2_FORMULA:
+			# 🌟 SCROLL UP TIMING: Run the formula array step increments cleanly
+			main_manager._step_formula_selection(-1)
+		ControlState.TIER_3_UNIFORM:
+			if main_manager.active_menu_kind == main_manager.MenuKind.SHADER_MENU:
+				main_manager._step_fast_travel_selection(-1)
+		ControlState.TIER_4_PARAMETER:
+			if parsed_uniforms.is_empty(): return
+			var max_channels = 2 if parsed_uniforms[active_index]["type"] == "vec2" else 4
+			last_tier4_index = posmod(last_tier4_index - 1, max_channels)
+			main_manager.open_parameter_select_menu()
+		ControlState.TIER_5_TWEAK:
+			last_tier5_row = posmod(last_tier5_row - 1, 2)
+			main_manager.open_live_tweak_console()
 
 func _on_dpad_down() -> void:
 	var main_manager = get_tree().get_first_node_in_group("main_manager")
-	if not main_manager: return
+	if not main_manager or active_state == ControlState.HIDDEN: return
 	
 	match active_state:
-		ControlState.MENU_NAVIGATION:
-			# 1. Menu Scrolling: Move selection down based on which menu is active
+		ControlState.SYSTEM_MENU:
+			system_menu_index = posmod(system_menu_index + 1, 3)
+			main_manager.redraw_system_power_menu()
+		ControlState.TIER_1_PASS:
 			if main_manager.active_menu_kind == main_manager.MenuKind.SELECT_PASS:
 				main_manager._step_select_pass_highlight(1)
-			elif main_manager.active_menu_kind == main_manager.MenuKind.SHADER_MENU:
+		ControlState.TIER_2_FORMULA:
+			# 🌟 SCROLL DOWN TIMING: Run the formula array step increments cleanly
+			main_manager._step_formula_selection(1)
+		ControlState.TIER_3_UNIFORM:
+			if main_manager.active_menu_kind == main_manager.MenuKind.SHADER_MENU:
 				main_manager._step_fast_travel_selection(1)
-				
-		ControlState.VECTOR_EXPANSION:
-			# 2. Vector Sub-Channel Cycling: Move through sub-dimensions (X, Y, etc.)
+		ControlState.TIER_4_PARAMETER:
+			if parsed_uniforms.is_empty(): return
 			var max_channels = 2 if parsed_uniforms[active_index]["type"] == "vec2" else 4
-			active_sub_channel = posmod(active_sub_channel + 1, max_channels)
-			update_status_readout()
-			
-		ControlState.VALUE_EDITING:
-			# 3. Value Tweaking: Shift shader parameter numbers downward
-			modify_active_value(-1.0)
+			last_tier4_index = posmod(last_tier4_index + 1, max_channels)
+			main_manager.open_parameter_select_menu()
+		ControlState.TIER_5_TWEAK:
+			last_tier5_row = posmod(last_tier5_row + 1, 2)
+			main_manager.open_live_tweak_console()
 
+# FUNCTION END: vertical_dpad_handlers
 
-func _on_action_button_b() -> void:
-	# 🌟 THE (B) BUTTON CONTROL ROUTER (CANCEL / BACK / HIDE)
-	var main_manager = get_tree().get_first_node_in_group("main_manager")
-	if not main_manager: return
-	
-	match active_state:
-		ControlState.VALUE_EDITING:
-			# 1. If editing a parameter value, exit edit mode and lock it back into list navigation
-			print("🎮 State Transition: VALUE_EDITING -> MENU_NAVIGATION")
-			active_state = ControlState.MENU_NAVIGATION
-			# Keep labels showing emoji guidance for menu navigation
-			refresh_menu_context_labels(true)
-			
-		ControlState.VECTOR_EXPANSION:
-			# 2. If viewing expanded channels (like [X] or [Y]), collapse them back to the main parameter list
-			print("🎮 State Transition: VECTOR_EXPANSION -> MENU_NAVIGATION")
-			active_state = ControlState.MENU_NAVIGATION
-			
-		ControlState.MENU_NAVIGATION:
-			# 3. If navigating lists, close the overlays entirely and hide the interface card
-			print("🎮 State Transition: MENU_NAVIGATION -> HIDDEN")
-			active_state = ControlState.HIDDEN
-			
-			# Call the clean-up routines on MainManager to pull down overlays
-			if main_manager.active_menu_kind == main_manager.MenuKind.SELECT_PASS:
-				main_manager.close_select_pass_menu(false)
-			elif main_manager.active_menu_kind == main_manager.MenuKind.SHADER_MENU:
-				main_manager.close_fast_travel_menu()
-				
-			refresh_menu_context_labels(false) # Restore regular idle dashboard labels
-			
-		ControlState.HIDDEN:
-			# 4. If already hidden, pressing B acts as a wake-up trigger to restore menu view
-			print("🎮 State Transition: HIDDEN -> MENU_NAVIGATION")
-			active_state = ControlState.MENU_NAVIGATION
-			
-			# Re-open whichever menu tab was last remembered by the system cache
-			match last_menu_tab_index:
-				0, 1: main_manager.open_select_pass_menu() # Pass/Shader menu tabs
-				2: main_manager.open_fast_travel_menu() # Parameter list tab
-			
-			refresh_menu_context_labels(true) # Activate green/red emoji guidelines
-
-# FUNCTION END: _on_left_dpad_left
-
-		
-	current_sens_index = max(0, current_sens_index - 1)
-	sensitivity = sensitivity_presets[current_sens_index]
-	update_status_readout()
-
-func _on_action_button_a() -> void:
-	# 🌟 THE (A) BUTTON CONTROL ROUTER (SELECT / CONFIRM / ENTER EDIT)
-	var main_manager = get_tree().get_first_node_in_group("main_manager")
-	if not main_manager: return
-	
-	match active_state:
-		ControlState.HIDDEN:
-			# If hidden, the A button is locked out to prevent accidental pattern changes
-			return
-			
-		ControlState.MENU_NAVIGATION:
-			# If scrolling column items, look up what row item is highlighted
-			if main_manager.active_menu_kind == main_manager.MenuKind.SELECT_PASS:
-				# 1. If on the Pass Layer menu, apply selection immediately without closing view
-				print("🎮 Action: Confirming Pass Layer selection without closing menu card")
-				main_manager.close_select_pass_menu(true) # Apply pass selection variables
-				main_manager.open_select_pass_menu() # Re-open layout stack immediately
-				
-			elif main_manager.active_menu_kind == main_manager.MenuKind.SHADER_MENU:
-				# 2. If on a parameter row, check if it is a multi-channel vector
-				if parsed_uniforms.is_empty(): return
-				var active_uniform = parsed_uniforms[active_index]
-				var u_type = active_uniform["type"]
-				
-				if u_type == "vec2" or u_type == "vec4":
-					# Has sub-variables! Expand inline into the Vector sub-menu state
-					print("🎮 State Transition: MENU_NAVIGATION -> VECTOR_EXPANSION")
-					active_state = ControlState.VECTOR_EXPANSION
-					active_sub_channel = 0
-				else:
-					# Standard float variable. Enter Value Editing mode directly
-					print("🎮 State Transition: MENU_NAVIGATION -> VALUE_EDITING")
-					active_state = ControlState.VALUE_EDITING
-					
-			refresh_menu_context_labels(true)
-			
-		ControlState.VECTOR_EXPANSION:
-			# 3. If currently selecting a specific sub-channel vector coordinate row, enter Edit Mode on it
-			print("🎮 State Transition: VECTOR_EXPANSION -> VALUE_EDITING")
-			active_state = ControlState.VALUE_EDITING
-			refresh_menu_context_labels(true)
-			
-		ControlState.VALUE_EDITING:
-			# 4. If already in value editing mode, pressing A acts as a lock/save confirmation shortcut
-			print("🎮 Action: Saving value adjustments and locking parameters")
-			active_state = ControlState.MENU_NAVIGATION
-			refresh_menu_context_labels(true)
-
-# FUNCTION END: _on_left_dpad_right
-
-		
-	current_sens_index = min(sensitivity_presets.size() - 1, current_sens_index + 1)
-	sensitivity = sensitivity_presets[current_sens_index]
-	update_status_readout()
-
-func _on_right_dpad_up() -> void:
-	var main_manager = get_tree().get_first_node_in_group("main_manager")
-	if main_manager and main_manager.is_menu_open:
-		_on_dpad_up()
-		return
-	modify_active_value(1.0)
-
-func _on_right_dpad_down() -> void:
-	var main_manager = get_tree().get_first_node_in_group("main_manager")
-	if main_manager and main_manager.is_menu_open:
-		_on_dpad_down()
-		return
-	modify_active_value(-1.0)
 
 func _on_dpad_left() -> void:
 	var main_manager = get_tree().get_first_node_in_group("main_manager")
-	if not main_manager: return
+	if not main_manager or active_state == ControlState.HIDDEN: return
 	
 	match active_state:
-		ControlState.MENU_NAVIGATION:
-			# 🌟 TAB ISOLATION CLEANOUT: Clean up any lingering open menus before switching tabs
-			if main_manager.select_pass_overlay_panel and is_instance_valid(main_manager.select_pass_overlay_panel):
-				main_manager.select_pass_overlay_panel.queue_free()
-				main_manager.select_pass_overlay_panel = null
-			if main_manager.menu_overlay_panel and is_instance_valid(main_manager.menu_overlay_panel):
-				main_manager.menu_overlay_panel.queue_free()
-				main_manager.menu_overlay_panel = null
+		ControlState.TIER_5_TWEAK:
+			if last_tier5_row == 0:
+				modify_active_value(-1.0)
+			else:
+				current_sens_index = max(0, current_sens_index - 1)
+				sensitivity = sensitivity_presets[current_sens_index]
+			main_manager.open_live_tweak_console()
 
-			# Column Cycling: Shift left between the three core menu tabs
-			last_menu_tab_index = posmod(last_menu_tab_index - 1, 3)
-			print("🎮 Column Navigation: Shift Left. Tab Index: ", last_menu_tab_index)
-			
-			# Cycle open handlers based on tab memory index maps
-			if last_menu_tab_index == 0 or last_menu_tab_index == 1:
-				main_manager.open_select_pass_menu()
-			elif last_menu_tab_index == 2:
-				main_manager.open_fast_travel_menu()
-				
-		ControlState.VALUE_EDITING:
-			# Precision Tuning: Step sensitivity presets down (coarser steps)
-			current_sens_index = max(0, current_sens_index - 1)
-			sensitivity = sensitivity_presets[current_sens_index]
-			update_status_readout()
 
 func _on_dpad_right() -> void:
+	var main_manager = get_tree().get_first_node_in_group("main_manager")
+	if not main_manager or active_state == ControlState.HIDDEN: return
+	
+	match active_state:
+		ControlState.TIER_5_TWEAK:
+			if last_tier5_row == 0:
+				modify_active_value(1.0)
+			else:
+				current_sens_index = min(sensitivity_presets.size() - 1, current_sens_index + 1)
+				sensitivity = sensitivity_presets[current_sens_index]
+			main_manager.open_live_tweak_console()
+
+func _on_action_button_b() -> void:
+	# 🌟 5-TIER SEQUENTIAL OVERHAUL: POP BACKWARDS ROUTER
 	var main_manager = get_tree().get_first_node_in_group("main_manager")
 	if not main_manager: return
 	
 	match active_state:
-		ControlState.MENU_NAVIGATION:
-			# 🌟 TAB ISOLATION CLEANOUT: Clean up any lingering open menus before switching tabs
-			if main_manager.select_pass_overlay_panel and is_instance_valid(main_manager.select_pass_overlay_panel):
-				main_manager.select_pass_overlay_panel.queue_free()
-				main_manager.select_pass_overlay_panel = null
+		ControlState.SYSTEM_MENU:
+			print("⚙️ System: Closing Main Power Menu overlay")
+			active_state = ControlState.HIDDEN
 			if main_manager.menu_overlay_panel and is_instance_valid(main_manager.menu_overlay_panel):
 				main_manager.menu_overlay_panel.queue_free()
 				main_manager.menu_overlay_panel = null
+			main_manager.menu_center_host.visible = false
 
-			# Column Cycling: Shift right between the three core menu tabs
-			last_menu_tab_index = posmod(last_menu_tab_index + 1, 3)
-			print("🎮 Column Navigation: Shift Right. Tab Index: ", last_menu_tab_index)
-			
-			# Cycle open handlers based on tab memory index maps
-			if last_menu_tab_index == 0 or last_menu_tab_index == 1:
-				main_manager.open_select_pass_menu()
-			elif last_menu_tab_index == 2:
-				main_manager.open_fast_travel_menu()
+		ControlState.TIER_5_TWEAK:
+			print("🎮 Hierarchy Pop: TIER_5_TWEAK -> TIER_4_PARAMETER")
+			active_state = ControlState.TIER_4_PARAMETER
+			main_manager.open_parameter_select_menu()
+
+		ControlState.TIER_4_PARAMETER:
+			print("🎮 Hierarchy Pop: TIER_4_PARAMETER -> TIER_3_UNIFORM")
+			active_state = ControlState.TIER_3_UNIFORM
+			main_manager.open_fast_travel_menu()
+
+		ControlState.TIER_3_UNIFORM:
+			print("🎮 Hierarchy Pop: TIER_3_UNIFORM -> TIER_2_FORMULA")
+			# 🌟 Drop backward into the Recipe selection list cleanly
+			active_state = ControlState.TIER_2_FORMULA
+			main_manager.open_formula_select_menu()
+
+		ControlState.TIER_2_FORMULA:
+			print("🎮 Hierarchy Pop: TIER_2_FORMULA -> TIER_1_PASS")
+			# 🌟 Delete the cyan container frame completely before restoring Tier 1's unique orange frame
+			if main_manager.menu_overlay_panel and is_instance_valid(main_manager.menu_overlay_panel):
+				main_manager.menu_overlay_panel.queue_free()
+				main_manager.menu_overlay_panel = null
+				main_manager.menu_list_box = null
 				
-		ControlState.VALUE_EDITING:
-			# Precision Tuning: Step sensitivity presets up (finer steps)
-			current_sens_index = min(sensitivity_presets.size() - 1, current_sens_index + 1)
-			sensitivity = sensitivity_presets[current_sens_index]
-			update_status_readout()
+			active_state = ControlState.TIER_1_PASS
+			main_manager.open_select_pass_menu()
+
+		ControlState.TIER_1_PASS:
+			print("Keep App Open: Collapsing overlay display to hidden dashboard frame")
+			active_state = ControlState.HIDDEN
+			if main_manager.select_pass_overlay_panel and is_instance_valid(main_manager.select_pass_overlay_panel):
+				main_manager.select_pass_overlay_panel.queue_free()
+				main_manager.select_pass_overlay_panel = null
+			main_manager.menu_center_host.visible = false
+
+		ControlState.HIDDEN:
+			return
+
+# FUNCTION END: _on_action_button_b
+
+func _on_action_button_a() -> void:
+	# 🌟 RECIPE TOKENS SYNC OVERHAUL: Enforces direct escape cutoffs inside Tier 2
+	var main_manager = get_tree().get_first_node_in_group("main_manager")
+	if not main_manager: return
+	
+	match active_state:
+		ControlState.HIDDEN:
+			return
+
+		ControlState.SYSTEM_MENU:
+			match system_menu_index:
+				0: _on_action_button_b()
+				1: print("⚙️ System Action: Open options panels context configuration")
+				2: get_tree().quit()
+
+		ControlState.TIER_1_PASS:
+			print("🎮 Hierarchy Push: TIER_1_PASS -> TIER_2_FORMULA")
+			active_state = ControlState.TIER_2_FORMULA
+			main_manager.close_select_pass_menu(true)
+			last_tier2_index = 0 
+			main_manager.open_formula_select_menu()
+
+		ControlState.TIER_2_FORMULA:
+			print("🎮 Hierarchy Push: TIER_2_FORMULA Target Ingestion -> Pass: %d, Recipe Row: %d" % [last_tier1_index, last_tier2_index])
+			
+			# 🌟 INSIGHT 1 CUTOFF FIX: If selecting Row 0 (RESET ACTIVE FORMULA), compile the glass shader 
+			# and immediately drop back to safety without advancing the navigation state deeper!
+			if last_tier2_index == 0:
+				print("🧹 Hardware Trigger: Resetting active formula back to clear window glass")
+				var glass_shader = Shader.new()
+				if last_tier1_index == 1:
+					glass_shader.code = "shader_type canvas_item; uniform sampler2D u_pattern_texture; void fragment() { COLOR = texture(u_pattern_texture, UV); }"
+					main_manager.pass2_material.shader = glass_shader
+					main_manager.pass2_material.set_shader_parameter("u_pattern_texture", main_manager.pass1_viewport.get_texture())
+				elif last_tier1_index == 2:
+					glass_shader.code = "shader_type canvas_item; uniform sampler2D u_warped_texture; void fragment() { COLOR = texture(u_warped_texture, UV); }"
+					main_manager.pass3_material.shader = glass_shader
+					main_manager.pass3_material.set_shader_parameter("u_warped_texture", main_manager.pass2_viewport.get_texture())
+				
+				# Keep the user safely right here on the Tier 2 selection screen and force a text-mode refresh
+				load_shader_source(glass_shader.code)
+				main_manager.redraw_formula_select_menu()
+				return # 🌟 Hard break prevents pushing down to Tier 3!
+			
+			var target_shader_code: String = ""
+			
+			match last_tier1_index:
+				0: # PASS 1: Base Patterns
+					target_shader_code = main_manager.pass1_material.shader.code
+				1: # PASS 2: Geometric Warping
+					var new_shader = Shader.new()
+					if last_tier2_index == 1:
+						print("🔌 Injecting: Pass 2 Real Kaleidoscope Math text string")
+						target_shader_code = main_manager.real_p2_source
+					
+					new_shader.code = target_shader_code
+					main_manager.pass2_material.shader = new_shader
+					main_manager.pass2_material.set_shader_parameter("u_pattern_texture", main_manager.pass1_viewport.get_texture())
+				2: # PASS 3: Post-Process Filters
+					var new_shader = Shader.new()
+					if last_tier2_index == 1:
+						print("🔌 Injecting: Pass 3 Real Edge Glow Filter text string")
+						target_shader_code = main_manager.real_p3_source
+					
+					new_shader.code = target_shader_code
+					main_manager.pass3_material.shader = new_shader
+					main_manager.pass3_material.set_shader_parameter("u_warped_texture", main_manager.pass2_viewport.get_texture())
+			
+			# Feed the direct code block string variable straight into the tokenizer parser cache
+			load_shader_source(target_shader_code)
+					
+			# Advance player context straight down to Tier 3's clean Uniform listings view
+			active_state = ControlState.TIER_3_UNIFORM
+			last_tier3_index = 0 
+			main_manager.open_fast_travel_menu()
+
+		ControlState.TIER_3_UNIFORM:
+			if last_tier3_index == 0:
+				print("🧹 Hardware Trigger: Executing [ RESET ACTIVE EFFECTS ] arithmetic")
+				return
+				
+			if parsed_uniforms.is_empty(): return
+			print("🎮 Hierarchy Push: TIER_3_UNIFORM -> TIER_4_PARAMETER")
+			active_state = ControlState.TIER_4_PARAMETER
+			active_index = last_tier3_index - 1
+			last_tier4_index = 0 
+			main_manager.open_parameter_select_menu()
+
+		ControlState.TIER_4_PARAMETER:
+			print("🎮 Hierarchy Push: TIER_4_PARAMETER -> TIER_5_TWEAK")
+			active_state = ControlState.TIER_5_TWEAK
+			last_tier5_row = 0
+			main_manager.open_live_tweak_console()
+
+		ControlState.TIER_5_TWEAK:
+			return
+
+# FUNCTION END: _on_action_button_a
+
+
+
+
+
+
+
+#func _on_right_dpad_up() -> void:
+	#var main_manager = get_tree().get_first_node_in_group("main_manager")
+	#if main_manager and main_manager.is_menu_open:
+		#_on_dpad_up()
+		#return
+	#modify_active_value(1.0)
+#
+#func _on_right_dpad_down() -> void:
+	#var main_manager = get_tree().get_first_node_in_group("main_manager")
+	#if main_manager and main_manager.is_menu_open:
+		#_on_dpad_down()
+		#return
+	#modify_active_value(-1.0)
+
+
 
 
 func _on_channel_toggle_pressed() -> void:
@@ -479,11 +501,9 @@ func _on_channel_back() -> void:
 	elif u_type == "vec4": active_sub_channel = posmod(active_sub_channel - 1, 4)
 	else: active_sub_channel = 0
 	update_status_readout()
-
+	
+	
 func modify_active_value(direction_multiplier: float) -> void:
-
-
-	# The rest of your existing modify_active_value function remains the same:
 	if parsed_uniforms.is_empty(): return
 	var active_uniform = parsed_uniforms[active_index]
 
@@ -491,22 +511,33 @@ func modify_active_value(direction_multiplier: float) -> void:
 	var u_type = active_uniform["type"]
 	var applied_change = direction_multiplier * sensitivity
 	
+	if not uniform_values.has(u_name):
+		if u_type == "float": uniform_values[u_name] = 0.0
+		elif u_type == "vec2": uniform_values[u_name] = Vector2.ZERO
+		elif u_type == "vec4": uniform_values[u_name] = Color.BLACK
+	
 	if u_type == "float":
 		uniform_values[u_name] += applied_change
 		uniform_changed.emit(u_name, uniform_values[u_name])
 	elif u_type == "vec2":
-		if active_sub_channel == 0: uniform_values[u_name].x += applied_change
-		else: uniform_values[u_name].y += applied_change
+		var vec = uniform_values[u_name] as Vector2
+		if last_tier4_index == 0: vec.x += applied_change
+		else: vec.y += applied_change
+		uniform_values[u_name] = vec # 🌟 THE SYNC: Re-cache the mutated Vector data straight back into the map key
 		uniform_changed.emit(u_name, uniform_values[u_name])
 	elif u_type == "vec4":
 		var col = uniform_values[u_name] as Color
-		if active_sub_channel == 0: col.r = clamp(col.r + applied_change, 0.0, 1.0)
-		elif active_sub_channel == 1: col.g = clamp(col.g + applied_change, 0.0, 1.0)
-		elif active_sub_channel == 2: col.b = clamp(col.b + applied_change, 0.0, 1.0)
-		elif active_sub_channel == 3: col.a = clamp(col.a + applied_change, 0.0, 1.0)
-		uniform_values[u_name] = col
+		if last_tier4_index == 0: col.r = clamp(col.r + applied_change, 0.0, 1.0)
+		elif last_tier4_index == 1: col.g = clamp(col.g + applied_change, 0.0, 1.0)
+		elif last_tier4_index == 2: col.b = clamp(col.b + applied_change, 0.0, 1.0)
+		elif last_tier4_index == 3: col.a = clamp(col.a + applied_change, 0.0, 1.0)
+		uniform_values[u_name] = col # 🌟 THE SYNC: Re-cache the mutated Color data straight back into the map key
 		uniform_changed.emit(u_name, uniform_values[u_name])
 	update_status_readout()
+
+# FUNCTION END: modify_active_value
+
+
 
 func get_sub_channel_name(u_type: String) -> String:
 	if u_type == "vec2": return " [X]" if active_sub_channel == 0 else " [Y]"
