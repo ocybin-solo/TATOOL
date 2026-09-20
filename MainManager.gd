@@ -237,7 +237,7 @@ func setup_interface_layer() -> void:
 
 	# 🌟 OPT Button on BOTTOM
 	btn_select_pass = Button.new()
-	btn_select_pass.text = "💬\n"
+	btn_select_pass.text = "☰\n"
 	btn_select_pass.custom_minimum_size = Vector2(96, 96)
 	btn_select_pass.size_flags_vertical = Control.SIZE_SHRINK_END
 	btn_select_pass.add_theme_color_override("font_color", Color.CORNFLOWER_BLUE)
@@ -425,7 +425,7 @@ func redraw_system_power_menu() -> void:
 	label_title.add_theme_color_override("font_color", Color.RED)
 	menu_list_box.add_child(label_title)
 
-	var options = ["BACK TO GAME", "⚙ APP CONFIG OPTIONS", "⏻ EXIT APPLICATION"]
+	var options = ["BACK TO 🔧", "⚙ APP CONFIG OPTIONS", "⏻ EXIT APPLICATION"]
 	for i in range(options.size()):
 		var lbl = Label.new()
 		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

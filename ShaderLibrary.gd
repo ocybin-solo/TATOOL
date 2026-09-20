@@ -350,15 +350,432 @@ func global_uniforms(records: Array) -> Array:
 # STARTER RECIPES
 # =========================================================================
 func _register_builtin_recipes() -> void:
+	# 1. FBM (Smooth Noise)
 	_register("fbm_static", PASS_PATTERN, "DOMAIN-WARP: LAYERED MIX", SRC_FBM, false)
 	_register("fbm_cosine", PASS_PATTERN, "DOMAIN-WARP: COSINE PALETTE", SRC_FBM_COSINE, false)
 	_register("fbm_chrono", PASS_PATTERN, "DOMAIN-WARP: CHRONO MORPH", SRC_FBM_CHRONO, false)
-	_register("fbm_cyber", PASS_PATTERN, "DOMAIN-WARP: CYBER VEINS", SRC_FBM_CYBER, false) 
+	_register("fbm_cyber", PASS_PATTERN, "DOMAIN-WARP: CYBER VEINS", SRC_FBM_CYBER, false)
+	
+	# 2. GYROID (Trig Labyrinths)
+	_register("gyroid_static", PASS_PATTERN, "GYROID: LABYRINTH CORE", SRC_GYROID_STATIC, false)
+	_register("gyroid_cosine", PASS_PATTERN, "GYROID: COSINE PALETTE", SRC_GYROID_COSINE, false)
+	_register("gyroid_chrono", PASS_PATTERN, "GYROID: CHRONO MORPH", SRC_GYROID_CHRONO, false)
+	_register("gyroid_cyber", PASS_PATTERN, "GYROID: CYBER VEINS", SRC_GYROID_CYBER, false)
+	
+	# 3. VORONOI (Crystalline Cells)
+	_register("voronoi_static", PASS_PATTERN, "VORONOI: CRYSTAL CORE", SRC_VORONOI_STATIC, false)
+	_register("voronoi_cosine", PASS_PATTERN, "VORONOI: COSINE PALETTE", SRC_VORONOI_COSINE, false)
+	_register("voronoi_chrono", PASS_PATTERN, "VORONOI: CHRONO MORPH", SRC_VORONOI_CHRONO, false)
+	_register("voronoi_cyber", PASS_PATTERN, "VORONOI: CYBER VEINS", SRC_VORONOI_CYBER, false)
+	
+	# 4. PLASMA (Sinusoidal Fluids)
+	_register("plasma_static", PASS_PATTERN, "PLASMA: FLUID GRADIENT", SRC_PLASMA_STATIC, false) 
+	_register("plasma_cosine", PASS_PATTERN, "PLASMA: COSINE PALETTE", SRC_PLASMA_COSINE, false) 
+	_register("plasma_chrono", PASS_PATTERN, "PLASMA: CHRONO MORPH", SRC_PLASMA_CHRONO, false)   
+	_register("plasma_cyber", PASS_PATTERN, "PLASMA: CYBER VEINS", SRC_PLASMA_CYBER, false)     
+	
+	# Pass 2 & 3 Modules
 	_register("kaleidoscope", PASS_WARP, "KALEIDOSCOPE REFLECTION", SRC_KALEIDOSCOPE, true)
 	_register("swirl", PASS_WARP, "RADIAL SWIRL", SRC_SWIRL, true)
 	_register("edge_glow", PASS_FILTER, "ANALOG EDGE GLOW", SRC_EDGE_GLOW, false)
 
 
+
+const SRC_PLASMA_STATIC: String = """
+uniform vec2 u_plasma_scale = vec2(4.0, 4.0); // @label Wave Scale | @min 1.0 | @max 16.0 | @sens 0.1
+uniform float u_plasma_speed = 1.0; // @label Wave Speed | @min 0.0 | @max 4.0 | @sens 0.05
+uniform float u_turbulence = 1.0; // @label Wave Complexity | @min 0.2 | @max 4.0 | @sens 0.05
+
+uniform vec4 u_color_trough : source_color = vec4(0.02, 0.0, 0.1, 1.0); // @label Wave Trough | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_slope : source_color = vec4(0.1, 0.4, 0.8, 1.0); // @label Wave Slope | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_crest : source_color = vec4(0.0, 1.0, 0.9, 1.0); // @label Wave Crest | @min 0 | @max 1 | @sens 0.02
+
+vec4 fx_plasma_static(vec2 uv) {
+	vec2 p = (uv - 0.5) * u_plasma_scale;
+	float t = u_time * u_plasma_speed;
+	
+	// Layer 1: Linear moving horizontal wave
+	float v1 = sin(p.x * u_turbulence + t);
+	
+	// Layer 2: Moving angled wave
+	float v2 = sin(u_turbulence * (p.y * cos(t * 0.33) + p.x * sin(t * 0.21)) + t);
+	
+	// Layer 3: Radial circular wave moving out from an animated center coordinate
+	vec2 c_pos = p + vec2(sin(t * 0.4), cos(t * 0.35)) * 2.0;
+	float v3 = sin(sqrt(dot(c_pos, c_pos)) * u_turbulence - t);
+	
+	// Consolidate into a smooth mathematical fluid field value (normalized roughly to 0.0 - 1.0)
+	float plasma_field = (v1 + v2 + v3) / 3.0;
+	plasma_field = plasma_field * 0.5 + 0.5;
+	
+	// Basic scalar color mixing across the wave elevations
+	vec4 final_color = mix(u_color_trough, u_color_slope, smoothstep(0.0, 0.5, plasma_field));
+	final_color = mix(final_color, u_color_crest, smoothstep(0.5, 1.0, plasma_field));
+	
+	return final_color;
+}
+"""
+const SRC_PLASMA_COSINE: String = """
+uniform vec2 u_plasma_scale = vec2(4.0, 4.0); // @label Wave Scale | @min 1.0 | @max 16.0 | @sens 0.1
+uniform float u_plasma_speed = 1.0; // @label Wave Speed | @min 0.0 | @max 4.0 | @sens 0.05
+uniform float u_turbulence = 1.0; // @label Wave Complexity | @min 0.2 | @max 4.0 | @sens 0.05
+uniform float u_palette_frequency = 2.0; // @label Color Density | @min 0.5 | @max 6.0 | @sens 0.05
+uniform float u_color_cycle_speed = 0.5; // @label Color Cycle Speed | @min 0 | @max 3 | @sens 0.05
+
+uniform vec4 u_color_a : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label Wave Center | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_b : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label Wave Amplitude | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_c : source_color = vec4(1.0, 1.0, 1.0, 1.0); // @label Wave Frequency | @min 0 | @max 2 | @sens 0.02
+uniform vec4 u_color_d : source_color = vec4(0.0, 0.33, 0.67, 1.0); // @label Wave Phase | @min 0 | @max 1 | @sens 0.02
+
+vec4 fx_plasma_cosine(vec2 uv) {
+	vec2 p = (uv - 0.5) * u_plasma_scale;
+	float t = u_time * u_plasma_speed;
+	
+	float v1 = sin(p.x * u_turbulence + t);
+	float v2 = sin(u_turbulence * (p.y * cos(t * 0.33) + p.x * sin(t * 0.21)) + t);
+	vec2 c_pos = p + vec2(sin(t * 0.4), cos(t * 0.35)) * 2.0;
+	float v3 = sin(sqrt(dot(c_pos, c_pos)) * u_turbulence - t);
+	
+	float plasma_field = (v1 + v2 + v3) / 3.0;
+	plasma_field = plasma_field * 0.5 + 0.5;
+	
+	// Drive color phases dynamically using the combined wave topology + color clock
+	float color_phase = (plasma_field * u_palette_frequency) + (u_time * u_color_cycle_speed);
+	vec3 cos_color = u_color_a.rgb + u_color_b.rgb * cos(6.28318 * (u_color_c.rgb * color_phase + u_color_d.rgb));
+	
+	return vec4(cos_color, 1.0);
+}
+"""
+const SRC_PLASMA_CHRONO: String = """
+uniform vec2 u_plasma_scale = vec2(4.0, 4.0); // @label Wave Scale | @min 1.0 | @max 16.0 | @sens 0.1
+uniform float u_plasma_speed = 1.0; // @label Wave Speed | @min 0.0 | @max 4.0 | @sens 0.05
+uniform float u_turbulence = 1.0; // @label Wave Complexity | @min 0.2 | @max 4.0 | @sens 0.05
+uniform float u_color_morph_speed = 0.7; // @label Color Morph Speed | @min 0 | @max 4 | @sens 0.05
+
+uniform vec4 u_color_trough : source_color = vec4(0.02, 0.0, 0.1, 1.0); // @label Wave Trough | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_slope : source_color = vec4(0.1, 0.4, 0.8, 1.0); // @label Wave Slope | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_crest : source_color = vec4(0.0, 1.0, 0.9, 1.0); // @label Wave Crest | @min 0 | @max 1 | @sens 0.02
+
+vec4 fx_plasma_chrono(vec2 uv) {
+	vec2 p = (uv - 0.5) * u_plasma_scale;
+	float t = u_time * u_plasma_speed;
+	
+	float v1 = sin(p.x * u_turbulence + t);
+	float v2 = sin(u_turbulence * (p.y * cos(t * 0.33) + p.x * sin(t * 0.21)) + t);
+	vec2 c_pos = p + vec2(sin(t * 0.4), cos(t * 0.35)) * 2.0;
+	float v3 = sin(sqrt(dot(c_pos, c_pos)) * u_turbulence - t);
+	
+	float plasma_field = (v1 + v2 + v3) / 3.0;
+	plasma_field = plasma_field * 0.5 + 0.5;
+	
+	// Continuous baseline interpolation swap factor
+	float morph = sin(u_time * u_color_morph_speed) * 0.5 + 0.5;
+	vec4 morphing_trough = mix(u_color_trough, u_color_slope, morph);
+	vec4 morphing_crest = mix(u_color_crest, u_color_trough, morph * 0.6);
+	
+	vec4 final_color = mix(morphing_trough, u_color_slope, smoothstep(0.0, 0.5, plasma_field));
+	final_color = mix(final_color, morphing_crest, smoothstep(0.5, 1.0, plasma_field));
+	
+	return final_color;
+}
+"""
+const SRC_PLASMA_CYBER: String = """
+uniform vec2 u_plasma_scale = vec2(4.0, 4.0); // @label Wave Scale | @min 1.0 | @max 16.0 | @sens 0.1
+uniform float u_plasma_speed = 1.0; // @label Wave Speed | @min 0.0 | @max 4.0 | @sens 0.05
+uniform float u_turbulence = 1.0; // @label Wave Complexity | @min 0.2 | @max 4.0 | @sens 0.05
+uniform float u_vein_density = 14.0; // @label Pulse Density | @min 4.0 | @max 28.0 | @sens 0.5
+uniform float u_glow_sharpness = 0.84; // @label Glow Sharpness | @min 0.5 | @max 0.99 | @sens 0.01
+
+uniform vec4 u_color_base : source_color = vec4(0.01, 0.01, 0.03, 1.0); // @label Void Base | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_glow : source_color = vec4(0.0, 0.2, 0.15, 1.0); // @label Ambient Light | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_pattern_color : source_color = vec4(0.3, 1.0, 0.0, 1.0); // @label Neon Filament | @min 0 | @max 1 | @sens 0.02
+
+vec4 fx_plasma_cyber(vec2 uv) {
+	vec2 p = (uv - 0.5) * u_plasma_scale;
+	float t = u_time * u_plasma_speed;
+	
+	float v1 = sin(p.x * u_turbulence + t);
+	float v2 = sin(u_turbulence * (p.y * cos(t * 0.33) + p.x * sin(t * 0.21)) + t);
+	vec2 c_pos = p + vec2(sin(t * 0.4), cos(t * 0.35)) * 2.0;
+	float v3 = sin(sqrt(dot(c_pos, c_pos)) * u_turbulence - t);
+	
+	float plasma_field = (v1 + v2 + v3) / 3.0;
+	plasma_field = plasma_field * 0.5 + 0.5;
+	
+	// Compress the plasma terrain into repeating energy ring ripples
+	float pulse = sin(plasma_field * u_vein_density - u_time * 2.0) * 0.5 + 0.5;
+	float circuits = smoothstep(u_glow_sharpness, u_glow_sharpness + 0.05, pulse);
+	
+	// Layer an ambient topographical glow underneath the filaments
+	vec4 dynamic_bg = mix(u_color_base, u_color_glow, plasma_field);
+	
+	return mix(dynamic_bg, u_pattern_color, clamp(circuits, 0.0, 1.0));
+}
+"""
+
+
+const SRC_GYROID_STATIC: String = """
+uniform vec2 u_maze_scale = vec2(6.0, 6.0); // @label Maze Scale | @min 1.0 | @max 24.0 | @sens 0.1
+uniform float u_complexity = 1.0; // @label Labyrinth Folding | @min 0.5 | @max 4.0 | @sens 0.05
+uniform float u_morph_speed = 0.3; // @label Morph Speed | @min 0.0 | @max 3.0 | @sens 0.05
+uniform float u_wall_thickness = 0.25; // @label Wall Thickness | @min 0.05 | @max 0.6 | @sens 0.01
+
+uniform vec4 u_color_background : source_color = vec4(0.02, 0.03, 0.05, 1.0); // @label Floor Color | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_walls : source_color = vec4(0.4, 0.2, 0.6, 1.0); // @label Wall Core Color | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_accents : source_color = vec4(0.0, 0.9, 0.6, 1.0); // @label Ridge Highlight | @min 0 | @max 1 | @sens 0.02
+
+vec4 fx_gyroid_static(vec2 uv) {
+	// Center space and apply user scaling
+	vec2 p = (uv - 0.5) * u_maze_scale;
+	
+	// Create an artificial 3D coordinate system using time to drive the Z axis
+	float z_time = u_time * u_morph_speed;
+	
+	// Precalculate trigonometric space transformations
+	vec3 coord = vec3(p.x, p.y, z_time);
+	vec3 s = sin(coord * u_complexity);
+	vec3 c = cos(coord * u_complexity);
+	
+	// The fundamental Gyroid Surface Formula: sin(x)*cos(y) + sin(y)*cos(z) + sin(z)*cos(x)
+	float gyroid_field = (s.x * c.y) + (s.y * c.z) + (s.z * c.x);
+	
+	// Normalize the field score down to an absolute value for sharp corridor edges
+	float field_abs = abs(gyroid_field);
+	
+	// Define the structural walls using the user's thickness configuration
+	float wall_mask = smoothstep(u_wall_thickness + 0.05, u_wall_thickness, field_abs);
+	
+	// EXTRACT INTERNAL DATA: Generate sharp ridges down the direct center of the walls
+	float ridge_mask = smoothstep(0.08, 0.0, field_abs) * wall_mask;
+	
+	// Base layer blending
+	vec4 final_color = mix(u_color_background, u_color_walls, wall_mask);
+	
+	// Overlay structural highlights using the internal ridge vectors
+	final_color = mix(final_color, u_color_accents, ridge_mask);
+	
+	// Add depth shading based on proximity to the corridor center
+	return final_color * (1.0 - field_abs * 0.2);
+}
+"""
+const SRC_VORONOI_STATIC: String = """
+uniform vec2 u_cell_scale = vec2(5.0, 5.0); // @label Cell Scale | @min 1.0 | @max 20.0 | @sens 0.1
+uniform float u_jitter = 1.0; // @label Chaos / Jitter | @min 0.0 | @max 1.0 | @sens 0.05
+uniform float u_cell_speed = 0.5; // @label Cell Agitation | @min 0.0 | @max 3.0 | @sens 0.05
+uniform float u_border_thickness = 0.04; // @label Border Thickness | @min 0.01 | @max 0.2 | @sens 0.005
+
+uniform vec4 u_color_cell_core : source_color = vec4(0.05, 0.25, 0.4, 1.0); // @label Cell Core Color | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_cell_edge : source_color = vec4(0.1, 0.6, 0.7, 1.0); // @label Cell Slopes | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_border : source_color = vec4(1.0, 0.95, 0.8, 1.0); // @label Crystal Borders | @min 0 | @max 1 | @sens 0.02
+
+// Cellular hash to place points randomly inside grids
+vec2 voronoi_hash2d(vec2 p) {
+	return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))) * 43758.5453);
+}
+
+// Custom 2-distance Voronoi computation engine
+void evaluate_voronoi(vec2 p, out float out_d1, out float out_d2) {
+	vec2 n = floor(p);
+	vec2 f = fract(p);
+	
+	float d1 = 8.0;
+	float d2 = 8.0;
+	
+	// Loop through a 3x3 neighborhood of cells to check adjacent points
+	for (int j = -1; j <= 1; j++) {
+		for (int i = -1; i <= 1; i++) {
+			vec2 g = vec2(float(i), float(j));
+			vec2 o = voronoi_hash2d(n + g);
+			
+			// Animate the points inside their grids
+			o = 0.5 + 0.5 * sin(u_time * u_cell_speed + o * 6.2831);
+			
+			// Vector pointing from pixel to the animated feature point
+			vec2 r = g + o * u_jitter - f;
+			float d = dot(r, r); // Using squared distance for efficiency and look
+			
+			if (d < d1) {
+				d2 = d1;
+				d1 = d;
+			} else if (d < d2) {
+				d2 = d;
+			}
+		}
+	}
+	
+	// Return true Euclidean approximations
+	out_d1 = sqrt(d1);
+	out_d2 = sqrt(d2);
+}
+
+vec4 fx_voronoi_static(vec2 uv) {
+	vec2 st = uv * u_cell_scale;
+	
+	float d1, d2;
+	evaluate_voronoi(st, d1, d2);
+	
+	// Base lighting slope out from the absolute center point
+	vec4 base_crystal = mix(u_color_cell_core, u_color_cell_edge, smoothstep(0.0, 0.7, d1));
+	
+	// Extract internal data: d2 - d1 isolates the razor-thin border lines between cells
+	float crystal_borders = d2 - d1;
+	float border_mask = smoothstep(u_border_thickness, 0.0, crystal_borders);
+	
+	// Overlay crystal border lines
+	vec4 final_mix = mix(base_crystal, u_color_border, border_mask);
+	
+	// Dynamic faceted shading across the cells
+	return final_mix * (0.4 + 0.6 * smoothstep(0.0, 0.8, crystal_borders));
+}
+"""
+
+const SRC_VORONOI_COSINE: String = """
+uniform vec2 u_cell_scale = vec2(5.0, 5.0); // @label Cell Scale | @min 1.0 | @max 20.0 | @sens 0.1
+uniform float u_jitter = 1.0; // @label Chaos / Jitter | @min 0.0 | @max 1.0 | @sens 0.05
+uniform float u_cell_speed = 0.5; // @label Cell Agitation | @min 0.0 | @max 3.0 | @sens 0.05
+uniform float u_palette_frequency = 1.5; // @label Color Density | @min 0.2 | @max 5.0 | @sens 0.05
+uniform float u_color_cycle_speed = 0.4; // @label Color Cycle Speed | @min 0 | @max 3 | @sens 0.05
+
+uniform vec4 u_color_a : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label Wave Center | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_b : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label Wave Amplitude | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_c : source_color = vec4(1.0, 1.0, 1.0, 1.0); // @label Wave Frequency | @min 0 | @max 2 | @sens 0.02
+uniform vec4 u_color_d : source_color = vec4(0.0, 0.33, 0.67, 1.0); // @label Wave Phase | @min 0 | @max 1 | @sens 0.02
+
+vec2 voronoi_hash2d(vec2 p) {
+	return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))) * 43758.5453);
+}
+
+void evaluate_voronoi(vec2 p, out float out_d1, out float out_d2) {
+	vec2 n = floor(p); vec2 f = fract(p);
+	float d1 = 8.0; float d2 = 8.0;
+	for (int j = -1; j <= 1; j++) {
+		for (int i = -1; i <= 1; i++) {
+			vec2 g = vec2(float(i), float(j));
+			vec2 o = voronoi_hash2d(n + g);
+			o = 0.5 + 0.5 * sin(u_time * u_cell_speed + o * 6.2831);
+			vec2 r = g + o * u_jitter - f;
+			float d = dot(r, r);
+			if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) { d2 = d; }
+		}
+	}
+	out_d1 = sqrt(d1); out_d2 = sqrt(d2);
+}
+
+vec4 fx_voronoi_cosine(vec2 uv) {
+	vec2 st = uv * u_cell_scale;
+	float d1, d2;
+	evaluate_voronoi(st, d1, d2);
+	
+	// Use the cell distance radius and time to cycle the color spectrum
+	float t = (d1 * u_palette_frequency) + (u_time * u_color_cycle_speed);
+	vec3 cos_color = u_color_a.rgb + u_color_b.rgb * cos(6.28318 * (u_color_c.rgb * t + u_color_d.rgb));
+	
+	// Add cell shading structure by darkening cell boundaries slightly
+	float crystal_borders = d2 - d1;
+	return vec4(cos_color, 1.0) * (0.5 + 0.5 * smoothstep(0.0, 0.4, crystal_borders));
+}
+"""
+const SRC_VORONOI_CHRONO: String = """
+uniform vec2 u_cell_scale = vec2(5.0, 5.0); // @label Cell Scale | @min 1.0 | @max 20.0 | @sens 0.1
+uniform float u_jitter = 1.0; // @label Chaos / Jitter | @min 0.0 | @max 1.0 | @sens 0.05
+uniform float u_cell_speed = 0.5; // @label Cell Agitation | @min 0.0 | @max 3.0 | @sens 0.05
+uniform float u_border_thickness = 0.04; // @label Border Thickness | @min 0.01 | @max 0.2 | @sens 0.005
+uniform float u_color_morph_speed = 0.6; // @label Color Morph Speed | @min 0 | @max 4 | @sens 0.05
+
+uniform vec4 u_color_cell_core : source_color = vec4(0.05, 0.25, 0.4, 1.0); // @label Cell Core Color | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_cell_edge : source_color = vec4(0.1, 0.6, 0.7, 1.0); // @label Cell Slopes | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_border : source_color = vec4(1.0, 0.95, 0.8, 1.0); // @label Crystal Borders | @min 0 | @max 1 | @sens 0.02
+
+vec2 voronoi_hash2d(vec2 p) {
+	return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))) * 43758.5453);
+}
+
+void evaluate_voronoi(vec2 p, out float out_d1, out float out_d2) {
+	vec2 n = floor(p); vec2 f = fract(p);
+	float d1 = 8.0; float d2 = 8.0;
+	for (int j = -1; j <= 1; j++) {
+		for (int i = -1; i <= 1; i++) {
+			vec2 g = vec2(float(i), float(j));
+			vec2 o = voronoi_hash2d(n + g);
+			o = 0.5 + 0.5 * sin(u_time * u_cell_speed + o * 6.2831);
+			vec2 r = g + o * u_jitter - f;
+			float d = dot(r, r);
+			if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) { d2 = d; }
+		}
+	}
+	out_d1 = sqrt(d1); out_d2 = sqrt(d2);
+}
+
+vec4 fx_voronoi_chrono(vec2 uv) {
+	vec2 st = uv * u_cell_scale;
+	float d1, d2;
+	evaluate_voronoi(st, d1, d2);
+	
+	// Create an oscillating timeline shift factor for the color parameters
+	float shift = sin(u_time * u_color_morph_speed) * 0.5 + 0.5;
+	vec4 morphing_core = mix(u_color_cell_core, u_color_cell_edge, shift);
+	vec4 morphing_edge = mix(u_color_cell_edge, u_color_border, shift * 0.4);
+	
+	vec4 base_crystal = mix(morphing_core, morphing_edge, smoothstep(0.0, 0.7, d1));
+	
+	float crystal_borders = d2 - d1;
+	float border_mask = smoothstep(u_border_thickness, 0.0, crystal_borders);
+	vec4 final_mix = mix(base_crystal, u_color_border, border_mask);
+	
+	return final_mix * (0.4 + 0.6 * smoothstep(0.0, 0.8, crystal_borders));
+}
+"""
+const SRC_VORONOI_CYBER: String = """
+uniform vec2 u_cell_scale = vec2(5.0, 5.0); // @label Cell Scale | @min 1.0 | @max 20.0 | @sens 0.1
+uniform float u_jitter = 1.0; // @label Chaos / Jitter | @min 0.0 | @max 1.0 | @sens 0.05
+uniform float u_cell_speed = 0.5; // @label Cell Agitation | @min 0.0 | @max 3.0 | @sens 0.05
+uniform float u_vein_density = 10.0; // @label Pulse Density | @min 4.0 | @max 25.0 | @sens 0.5
+uniform float u_glow_sharpness = 0.80; // @label Glow Sharpness | @min 0.5 | @max 0.99 | @sens 0.01
+
+uniform vec4 u_color_base : source_color = vec4(0.01, 0.01, 0.03, 1.0); // @label Cell Void Color | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_glow : source_color = vec4(0.2, 0.0, 0.1, 1.0); // @label Plate Radiance | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_pattern_color : source_color = vec4(1.0, 0.0, 0.4, 1.0); // @label Filament Laser | @min 0 | @max 1 | @sens 0.02
+
+vec2 voronoi_hash2d(vec2 p) {
+	return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))) * 43758.5453);
+}
+
+void evaluate_voronoi(vec2 p, out float out_d1, out float out_d2) {
+	vec2 n = floor(p); vec2 f = fract(p);
+	float d1 = 8.0; float d2 = 8.0;
+	for (int j = -1; j <= 1; j++) {
+		for (int i = -1; i <= 1; i++) {
+			vec2 g = vec2(float(i), float(j));
+			vec2 o = voronoi_hash2d(n + g);
+			o = 0.5 + 0.5 * sin(u_time * u_cell_speed + o * 6.2831);
+			vec2 r = g + o * u_jitter - f;
+			float d = dot(r, r);
+			if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) { d2 = d; }
+		}
+	}
+	out_d1 = sqrt(d1); out_d2 = sqrt(d2);
+}
+
+vec4 fx_voronoi_cyber(vec2 uv) {
+	vec2 st = uv * u_cell_scale;
+	float d1, d2;
+	evaluate_voronoi(st, d1, d2);
+	
+	float crystal_borders = d2 - d1;
+	
+	// Create an expanding energy pulse radiating outward from the borders
+	float pulse = sin(crystal_borders * u_vein_density - u_time * 2.0) * 0.5 + 0.5;
+	float grid_lines = smoothstep(u_glow_sharpness, u_glow_sharpness + 0.08, pulse);
+	
+	// Give an ambient radioactive look hugging the edges of plates
+	vec4 dynamic_bg = mix(u_color_base, u_color_glow, smoothstep(0.5, 0.0, crystal_borders));
+	
+	// Fade the lines inside the exact geometric cores of the plates
+	float filament_mask = grid_lines * smoothstep(0.02, 0.15, crystal_borders);
+	
+	return mix(dynamic_bg, u_pattern_color, clamp(filament_mask, 0.0, 1.0));
+}
+"""
 
 
 const SRC_FBM: String = """
@@ -412,6 +829,110 @@ vec4 fx_fbm_static(vec2 uv) {
 	return final_mix * (final_field_math * 1.5 + 0.3);
 }
 """
+
+const SRC_GYROID_COSINE: String = """
+uniform vec2 u_maze_scale = vec2(6.0, 6.0); // @label Maze Scale | @min 1.0 | @max 24.0 | @sens 0.1
+uniform float u_complexity = 1.0; // @label Labyrinth Folding | @min 0.5 | @max 4.0 | @sens 0.05
+uniform float u_morph_speed = 0.3; // @label Morph Speed | @min 0.0 | @max 3.0 | @sens 0.05
+uniform float u_palette_frequency = 1.5; // @label Color Density | @min 0.2 | @max 5.0 | @sens 0.05
+uniform float u_color_cycle_speed = 0.4; // @label Color Cycle Speed | @min 0 | @max 3 | @sens 0.05
+
+uniform vec4 u_color_a : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label Wave Center | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_b : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label Wave Amplitude | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_c : source_color = vec4(1.0, 1.0, 1.0, 1.0); // @label Wave Frequency | @min 0 | @max 2 | @sens 0.02
+uniform vec4 u_color_d : source_color = vec4(0.3, 0.1, 0.5, 1.0); // @label Wave Phase | @min 0 | @max 1 | @sens 0.02
+
+vec4 fx_gyroid_cosine(vec2 uv) {
+	vec2 p = (uv - 0.5) * u_maze_scale;
+	float z_time = u_time * u_morph_speed;
+	
+	vec3 coord = vec3(p.x, p.y, z_time);
+	float gyroid_field = (sin(coord.x*u_complexity) * cos(coord.y*u_complexity)) + 
+	                     (sin(coord.y*u_complexity) * cos(coord.z)) + 
+	                     (sin(coord.z) * cos(coord.x*u_complexity));
+	
+	float field_abs = abs(gyroid_field);
+	
+	// Drive the cosine color phase using the spatial maze depth combined with independent color time
+	float t = (field_abs * u_palette_frequency) + (u_time * u_color_cycle_speed);
+	vec3 cos_color = u_color_a.rgb + u_color_b.rgb * cos(6.28318 * (u_color_c.rgb * t + u_color_d.rgb));
+	
+	// Darken the very center of deep corridors for structural depth shadow
+	return vec4(cos_color, 1.0) * (1.0 - smoothstep(1.2, 2.0, field_abs) * 0.4);
+}
+"""
+const SRC_GYROID_CHRONO: String = """
+uniform vec2 u_maze_scale = vec2(6.0, 6.0); // @label Maze Scale | @min 1.0 | @max 24.0 | @sens 0.1
+uniform float u_complexity = 1.0; // @label Labyrinth Folding | @min 0.5 | @max 4.0 | @sens 0.05
+uniform float u_morph_speed = 0.3; // @label Morph Speed | @min 0.0 | @max 3.0 | @sens 0.05
+uniform float u_wall_thickness = 0.25; // @label Wall Thickness | @min 0.05 | @max 0.6 | @sens 0.01
+uniform float u_color_morph_speed = 0.6; // @label Color Morph Speed | @min 0 | @max 4 | @sens 0.05
+
+uniform vec4 u_color_background : source_color = vec4(0.01, 0.02, 0.05, 1.0); // @label Floor Color | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_walls : source_color = vec4(0.8, 0.2, 0.1, 1.0); // @label Wall Core Color | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_accents : source_color = vec4(1.0, 0.7, 0.0, 1.0); // @label Ridge Highlight | @min 0 | @max 1 | @sens 0.02
+
+vec4 fx_gyroid_chrono(vec2 uv) {
+	vec2 p = (uv - 0.5) * u_maze_scale;
+	float z_time = u_time * u_morph_speed;
+	
+	vec3 coord = vec3(p.x, p.y, z_time);
+	float gyroid_field = (sin(coord.x*u_complexity) * cos(coord.y*u_complexity)) + 
+	                     (sin(coord.y*u_complexity) * cos(coord.z)) + 
+	                     (sin(coord.z) * cos(coord.x*u_complexity));
+	
+	float field_abs = abs(gyroid_field);
+	float wall_mask = smoothstep(u_wall_thickness + 0.05, u_wall_thickness, field_abs);
+	float ridge_mask = smoothstep(0.08, 0.0, field_abs) * wall_mask;
+	
+	// Create a continuous color blending timeline factor
+	float shift = sin(u_time * u_color_morph_speed) * 0.5 + 0.5;
+	vec4 morphing_walls = mix(u_color_walls, u_color_accents, shift);
+	vec4 morphing_accents = mix(u_color_accents, u_color_background, shift * 0.5);
+	
+	vec4 final_color = mix(u_color_background, morphing_walls, wall_mask);
+	final_color = mix(final_color, morphing_accents, ridge_mask);
+	
+	return final_color * (1.0 - field_abs * 0.2);
+}
+"""
+const SRC_GYROID_CYBER: String = """
+uniform vec2 u_maze_scale = vec2(6.0, 6.0); // @label Maze Scale | @min 1.0 | @max 24.0 | @sens 0.1
+uniform float u_complexity = 1.0; // @label Labyrinth Folding | @min 0.5 | @max 4.0 | @sens 0.05
+uniform float u_morph_speed = 0.3; // @label Morph Speed | @min 0.0 | @max 3.0 | @sens 0.05
+uniform float u_vein_density = 15.0; // @label Vein Density | @min 4 | @max 35 | @sens 0.5
+uniform float u_glow_sharpness = 0.82; // @label Glow Sharpness | @min 0.5 | @max 0.99 | @sens 0.01
+
+uniform vec4 u_color_base : source_color = vec4(0.01, 0.01, 0.03, 1.0); // @label Void Color | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_glow : source_color = vec4(0.1, 0.0, 0.25, 1.0); // @label Ambient Glow | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_pattern_color : source_color = vec4(0.0, 1.0, 0.5, 1.0); // @label Laser Filament | @min 0 | @max 1 | @sens 0.02
+
+vec4 fx_gyroid_cyber(vec2 uv) {
+	vec2 p = (uv - 0.5) * u_maze_scale;
+	float z_time = u_time * u_morph_speed;
+	
+	vec3 coord = vec3(p.x, p.y, z_time);
+	float gyroid_field = (sin(coord.x*u_complexity) * cos(coord.y*u_complexity)) + 
+	                     (sin(coord.y*u_complexity) * cos(coord.z)) + 
+	                     (sin(coord.z) * cos(coord.x*u_complexity));
+	
+	float field_abs = abs(gyroid_field);
+	
+	// Slice the terrain into recursive circuit ring frequencies
+	float laser_pulse = sin(field_abs * u_vein_density - u_time * 1.5) * 0.5 + 0.5;
+	float circuits = smoothstep(u_glow_sharpness, u_glow_sharpness + 0.06, laser_pulse);
+	
+	// Create ambient light bands hugging the structural corridors
+	vec4 dynamic_bg = mix(u_color_base, u_color_glow, smoothstep(1.5, 0.0, field_abs));
+	
+	// Mask the laser filaments so they get weaker/thinner inside the ultra-deep corridor nodes
+	float laser_mask = circuits * smoothstep(2.0, 0.2, field_abs);
+	
+	return mix(dynamic_bg, u_pattern_color, clamp(laser_mask, 0.0, 1.0));
+}
+"""
+
+
 const SRC_FBM_COSINE: String = """
 uniform vec2 u_warp_frequency = vec2(2.5, 2.5); // @label Warp Frequency | @min 0.1 | @max 12 | @sens 0.05
 uniform float u_warp_strength = 1.1; // @label Warp Strength | @min 0 | @max 4 | @sens 0.05

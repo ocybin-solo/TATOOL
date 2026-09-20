@@ -69,6 +69,8 @@ var btn_channel: Button
 
 func _ready() -> void:
 	setup_ui_layout()
+	
+	
 func setup_ui_layout() -> void:
 	# THE COMPACT HARDWARE CONTROL CONTAINER
 	var chassis_stack = VBoxContainer.new()
@@ -84,10 +86,10 @@ func setup_ui_layout() -> void:
 
 	# A Button (✔ ACCEPT)
 	btn_channel = Button.new()
-	btn_channel.text = "⭘"
+	btn_channel.text = "▢"
 	btn_channel.custom_minimum_size = Vector2(96, 96)
-	btn_channel.add_theme_font_size_override("font_size", 44)
-	#btn_channel.add_theme_color_override("font_color", Color.GREEN)
+	btn_channel.add_theme_font_size_override("font_size", 36)
+	btn_channel.add_theme_color_override("font_color", Color.GREEN)
 	btn_channel.pressed.connect(_on_action_button_a) # Wired to Accept logic
 	action_row.add_child(btn_channel)
 
@@ -98,10 +100,10 @@ func setup_ui_layout() -> void:
 
 	# B Button (❌ BACK)
 	btn_sens_left = Button.new()
-	btn_sens_left.text = "✖"
+	btn_sens_left.text = "▢"
 	btn_sens_left.custom_minimum_size = Vector2(96, 96)
 	btn_sens_left.add_theme_font_size_override("font_size", 36)
-	#btn_sens_left.add_theme_color_override("font_color", Color.RED)
+	btn_sens_left.add_theme_color_override("font_color", Color.RED)
 	btn_sens_left.pressed.connect(_on_action_button_b) # Wired to Exit/Back logic
 	action_row.add_child(btn_sens_left)
 
@@ -123,7 +125,7 @@ func setup_ui_layout() -> void:
 	# Row 1: Dead Space | UP | Dead Space
 	dpad_grid.add_child(Control.new())
 	btn_param_up = Button.new()
-	btn_param_up.text = "⇑"
+	btn_param_up.text = "△"
 	btn_param_up.custom_minimum_size = Vector2(96, 96)
 	btn_param_up.add_theme_font_size_override("font_size", 44)
 	btn_param_up.pressed.connect(_on_dpad_up) # Wired to Navigate Up
@@ -132,7 +134,7 @@ func setup_ui_layout() -> void:
 
 	# Row 2: LEFT | CENTER DISPLAY INDEX | RIGHT
 	btn_channel_prev = Button.new()
-	btn_channel_prev.text = "⇐"
+	btn_channel_prev.text = "◁"
 	btn_channel_prev.custom_minimum_size = Vector2(96, 96)
 	btn_channel_prev.add_theme_font_size_override("font_size", 44)
 	btn_channel_prev.pressed.connect(_on_dpad_left) # Wired to Cycle Left
@@ -146,7 +148,7 @@ func setup_ui_layout() -> void:
 	dpad_grid.add_child(label_sens_indicator)
 
 	btn_channel_next = Button.new()
-	btn_channel_next.text = "⇒"
+	btn_channel_next.text = "▷"
 	btn_channel_next.custom_minimum_size = Vector2(96, 96)
 	btn_channel_next.add_theme_font_size_override("font_size", 44)
 	btn_channel_next.pressed.connect(_on_dpad_right) # Wired to Cycle Right
@@ -155,7 +157,7 @@ func setup_ui_layout() -> void:
 	# Row 3: Dead Space | DOWN | Dead Space
 	dpad_grid.add_child(Control.new())
 	btn_param_down = Button.new()
-	btn_param_down.text = "⇓"
+	btn_param_down.text = "▽"
 	btn_param_down.custom_minimum_size = Vector2(96, 96)
 	btn_param_down.add_theme_font_size_override("font_size", 44)
 	btn_param_down.pressed.connect(_on_dpad_down) # Wired to Navigate Down
@@ -429,7 +431,7 @@ func update_status_readout() -> void:
 	if main_manager:
 		match main_manager.get("active_shader_layer"):
 			0: layer_header = "[PASS 1: PATTERN]"
-			1: layer_header = "[PASS 2: GEOMETRIC EFFECTS]"
+			1: layer_header = "[PASS 2: EFFECTS]"
 			2: layer_header = "[PASS 3: FILTERS]"
 	
 	# --- UPGRADED REAL-TIME HUD STATUS STRING CONCATENATION ---
