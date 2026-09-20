@@ -386,12 +386,533 @@ func _register_builtin_recipes() -> void:
 	_register("lines_chrono", PASS_PATTERN, "GEOMETRY: WIREFRAME CHRONO", SRC_LINES_CHRONO, false)  
  
 
-
-	
-	# Pass 2 & 3 Modules
+	# Pass 2 (Warp Modules) - Stackable!
 	_register("kaleidoscope", PASS_WARP, "KALEIDOSCOPE REFLECTION", SRC_KALEIDOSCOPE, true)
 	_register("swirl", PASS_WARP, "RADIAL SWIRL", SRC_SWIRL, true)
+	_register("polar_map", PASS_WARP, "POLAR TUNNEL MAP", SRC_POLAR_MAP, true) 
+	_register("chromatic_ripple", PASS_WARP, "CHROMATIC RIPPLE LENS", SRC_CHROMATIC_RIPPLE, true)
+	_register("droste_spiral", PASS_WARP, "DROSTE INFINITE SPIRAL", SRC_DROSTE_SPIRAL, true) 
+	_register("polar_kaleidoscope", PASS_WARP, "POLAR KALEIDOSCOPE", SRC_POLAR_KALEIDOSCOPE, true)
+	_register("field_shift", PASS_WARP, "VECTOR FIELD MELT", SRC_FIELD_SHIFT, true)
+	_register("fisheye_bulb", PASS_WARP, "FISHEYE BULB LENS", SRC_FISHEYE_BULB, true)
+	
+	
+	# Pass 3 - filters
 	_register("edge_glow", PASS_FILTER, "ANALOG EDGE GLOW", SRC_EDGE_GLOW, false)
+	_register("crt_screen", PASS_FILTER, "📺 CRT MONITOR SIMULATOR", SRC_CRT_SCREEN, false)
+	_register("vhs_glitch", PASS_FILTER, "📼 VHS TAPE GLITCH", SRC_VHS_GLITCH, false)
+	_register("pixel_crusher", PASS_FILTER, "🕹️ PIXELATION RESOLUTION CRUSHER", SRC_PIXEL_CRUSHER, false)
+	_register("vignette_blur", PASS_FILTER, "🎬 CINEMATIC VIGNETTE BLUR", SRC_VIGNETTE_BLUR, false)
+	_register("god_rays", PASS_FILTER, "☀️ VOLUMETRIC LIGHT STREAKS", SRC_GOD_RAYS, false)
+	_register("halftone_dots", PASS_FILTER, "🎨 HALFTONE DOT MATRIX", SRC_HALFTONE_DOTS, false)
+	_register("ascii_art", PASS_FILTER, "📟 ASCII CHARACTER TERMINAL", SRC_ASCII_ART, false)
+	_register("oil_painting", PASS_FILTER, "🖌️ OIL PAINTING CANVAS", SRC_OIL_PAINTING, false)
+
+const SRC_OIL_PAINTING: String = """
+uniform float u_brush_radius = 4.0; // @label Brush Stroke Size | @min 1.0 | @max 8.0 | @sens 0.5
+uniform float u_paint_coarseness = 3.0; // @label Color Clustering | @min 1.0 | @max 10.0 | @sens 0.5
+uniform float u_canvas_texture = 0.08; // @label Canvas Paper Grain | @min 0.0 | @max 0.3 | @sens 0.01
+
+// Simple generator to layer on canvas fabric weave grain lines
+float paint_hash(vec2 p) {
+	return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+}
+
+vec4 fx_oil_painting(vec2 uv) {
+	// Query the layout dimensions of the texture from previous passes
+	vec2 tex_size = vec2(textureSize(u_warped_texture, 0));
+	vec2 src_step = 1.0 / tex_size;
+	
+	// Create accumulation buffers for painterly color averages
+	vec3 color_sum = vec3(0.0);
+	float weight_sum = 0.0;
+	
+	int radius = int(floor(u_brush_radius));
+	
+	// Scan adjacent pixel clusters within our artistic brush boundary box
+	for (int j = -radius; j <= radius; j++) {
+		for (int i = -radius; i <= radius; i++) {
+			vec2 offset = vec2(float(i), float(j)) * src_step;
+			vec3 tex_sample = texture(u_warped_texture, clamp(uv + offset, 0.0, 1.0)).rgb;
+			
+			// Cluster colors into coarse brackets to group strokes together
+			vec3 clustered = floor(tex_sample * u_paint_coarseness) / u_paint_coarseness;
+			
+			color_sum += tex_sample;
+			weight_sum += 1.0;
+		}
+	}
+	
+	// Calculate the flattened canvas pigment core color
+	vec3 paint_pigment = color_sum / max(weight_sum, 1.0);
+	
+	// Layer an organic interlaced canvas thread texture over the paint layers
+	float fabric_weave = paint_hash(floor(uv * tex_size)) * u_canvas_texture;
+	paint_pigment += vec3(fabric_weave - (u_canvas_texture * 0.5));
+	
+	return vec4(paint_pigment, 1.0);
+}
+"""
+
+
+const SRC_ASCII_ART: String = """
+uniform float u_terminal_columns = 80.0; // @label Text Columns | @min 20 | @max 180 | @sens 2
+uniform float u_font_stretch = 1.5; // @label Character Height Ratio | @min 0.5 | @max 3.0 | @sens 0.05
+uniform vec4 u_text_color : source_color = vec4(0.0, 1.0, 0.3, 1.0); // @label Font Color | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_terminal_bg : source_color = vec4(0.01, 0.02, 0.01, 1.0); // @label Terminal Background | @min 0 | @max 1 | @sens 0.02
+
+// A procedural layout that mocks character glyph shapes based on cell coordinates
+float ascii_character_glyph(int character_id, vec2 cell_uv) {
+	vec2 p = abs(cell_uv - 0.5);
+	
+	if (character_id == 4) { // Dense character block '#'
+		return step(0.1, max(p.x, p.y)) * step(max(p.x, p.y), 0.45);
+	}
+	if (character_id == 3) { // Bold character 'X'
+		return step(abs(p.x - p.y), 0.08) * step(max(p.x, p.y), 0.4);
+	}
+	if (character_id == 2) { // Cross character '+'
+		return (step(p.x, 0.06) * step(p.y, 0.35)) + (step(p.y, 0.06) * step(p.x, 0.35));
+	}
+	if (character_id == 1) { // Center dash character '-'
+		return step(abs(cell_uv.y - 0.5), 0.05) * step(p.x, 0.3);
+	}
+	// Tiny dot character '.'
+	return step(length(cell_uv - 0.5), 0.08);
+}
+
+vec4 fx_ascii_art(vec2 uv) {
+	// 1. Establish character terminal row grid scaling configurations
+	vec2 text_scale = vec2(u_terminal_columns, u_terminal_columns * u_font_stretch);
+	
+	// Segment the coordinate layout down into individual grid cells
+	vec2 blocky_uv = floor(uv * text_scale) / text_scale;
+	vec2 local_cell_uv = fract(uv * text_scale);
+	
+	// 2. Measure local luminance inside the character block coordinate boundaries
+	vec4 source_sample = texture(u_warped_texture, blocky_uv);
+	float brightness = dot(source_sample.rgb, vec3(0.299, 0.587, 0.114));
+	
+	// Convert brightness score thresholds into a discrete character selector ID
+	int character_selector = int(floor(brightness * 5.0));
+	character_selector = clamp(character_selector, 0, 4);
+	
+	// 3. Render the shape of the chosen character glyph inside the local cell block
+	float glyph_mask = ascii_character_glyph(character_selector, local_cell_uv);
+	
+	// If the background cell brightness is completely dark, suppress drawing the glyph text
+	if (brightness < 0.05) { glyph_mask = 0.0; }
+	
+	// Mix character matrix inks over the command line terminal base screen backdrop
+	vec3 output_color = mix(u_terminal_bg.rgb, u_text_color.rgb, glyph_mask);
+	
+	return vec4(output_color, 1.0);
+}
+"""
+
+
+const SRC_HALFTONE_DOTS: String = """
+uniform float u_dot_frequency = 45.0; // @label Dot Frequency Grid | @min 10.0 | @max 150.0 | @sens 1.0
+uniform float u_halftone_sharpness = 0.08; // @label Dot Crispness | @min 0.01 | @max 0.4 | @sens 0.005
+uniform vec4 u_ink_color : source_color = vec4(0.0, 0.0, 0.0, 1.0); // @label Screenprint Ink | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_paper_color : source_color = vec4(0.95, 0.95, 0.9, 1.0); // @label Newsprint Paper | @min 0 | @max 1 | @sens 0.02
+
+vec4 fx_halftone_dots(vec2 uv) {
+	// Sample the compiled background canvas texture from previous passes
+	vec4 pixel_color = texture(u_warped_texture, uv);
+	
+	// Convert the RGB pixel stream into a clean scalar luminance (brightness) score
+	float luminance = dot(pixel_color.rgb, vec3(0.299, 0.587, 0.114));
+	
+	// Slice coordinate space up into a repeating dot matrix grid cell network
+	vec2 grid = fract(uv * u_dot_frequency) - 0.5;
+	float dot_radius = length(grid);
+	
+	// The dot size scales proportionally based on local luminance intensity
+	float target_size = luminance * 0.707; // 0.707 prevents dots from totally disappearing
+	
+	// Evaluate the edge mask boundaries of each print ink circle cell
+	float print_mask = smoothstep(target_size, target_size - u_halftone_sharpness, dot_radius);
+	
+	// Blend between your vintage textured paper stock color and your dark printing press ink
+	return mix(u_paper_color, u_ink_color, print_mask);
+}
+"""
+
+
+const SRC_GOD_RAYS: String = """
+uniform float u_ray_density = 0.95; // @label Ray Length | @min 0.5 | @max 0.99 | @sens 0.01
+uniform float u_ray_weight = 0.5; // @label Beam Exposure | @min 0.0 | @max 1.5 | @sens 0.05
+uniform float u_ray_decay = 0.98; // @label Falloff Decay | @min 0.9 | @max 1.0 | @sens 0.005
+uniform vec2 u_ray_source = vec2(0.5, 0.5); // @label Light Origin | @min 0.0 | @max 1.0 | @sens 0.01
+
+vec4 fx_god_rays(vec2 uv) {
+	// Calculate a directional vector pointing from the pixel back to the light center source
+	vec2 delta_uv = (uv - u_ray_source);
+	
+	// Scale the step division vector based on density parameters
+	delta_uv *= 1.0 / 8.0 * u_ray_density; // 8-tap approximation loop
+	
+	// Capture the baseline core image pixel color
+	vec4 base_color = texture(u_warped_texture, uv);
+	
+	// Create accumulation buffers for the projected light streaks
+	vec3 light_stream = base_color.rgb;
+	float current_illumination = 1.0;
+	
+	vec2 trace_uv = uv;
+	
+	// Step along the directional vector, sampling texture brightness layers
+	for (int i = 0; i < 8; i++) {
+		trace_uv -= delta_uv;
+		vec3 sample_layer = texture(u_warped_texture, clamp(trace_uv, 0.0, 1.0)).rgb;
+		
+		// Apply exponential decay attenuation curves
+		sample_layer *= current_illumination * u_ray_weight;
+		light_stream += sample_layer;
+		current_illumination *= u_ray_decay;
+	}
+	
+	// Blend the accumulated light beams back over the top of the crisp baseline color
+	return vec4(base_color.rgb + light_stream * 0.15, 1.0);
+}
+"""
+
+
+const SRC_VIGNETTE_BLUR: String = """
+uniform float u_vignette_extent = 0.5; // @label Vignette Radius | @min 0.1 | @max 1.5 | @sens 0.02
+uniform float u_vignette_softness = 0.45; // @label Vignette Softness | @min 0.05 | @max 1.0 | @sens 0.02
+uniform float u_blur_radius = 0.015; // @label Edge Blur Strength | @min 0.0 | @max 0.05 | @sens 0.001
+
+vec4 fx_vignette_blur(vec2 uv) {
+	// Center space to calculate radial distance for the lens edge
+	vec2 center_dist = uv - 0.5;
+	float d = length(center_dist);
+	
+	// 1. Calculate the vignette falloff mask using smoothstep
+	float vignette = smoothstep(u_vignette_extent, u_vignette_extent - u_vignette_softness, d);
+	
+	// 2. RADIAL BLUR PASS: The further from the center, the more samples we gather
+	float current_blur = smoothstep(u_vignette_extent * 0.5, u_vignette_extent, d) * u_blur_radius;
+	
+	vec4 color_accumulation = vec4(0.0);
+	float total_weight = 0.0;
+	
+	// 4-tap box blur array offsets for smooth edge sampling
+	vec2 blur_offsets[4] = vec2[](
+		vec2(-1.0, -1.0), vec2(1.0, -1.0),
+		vec2(-1.0, 1.0), vec2(1.0, 1.0)
+	);
+	
+	// Gather adjacent pixel weights based on radial blur gradient
+	for (int i = 0; i < 4; i++) {
+		vec2 sample_uv = uv + blur_offsets[i] * current_blur;
+		color_accumulation += texture(u_warped_texture, clamp(sample_uv, 0.0, 1.0));
+		total_weight += 1.0;
+	}
+	
+	vec4 final_sample = color_accumulation / total_weight;
+	
+	// Apply the dark vignette frame overlay onto the blurred pixel stream
+	final_sample.rgb *= vignette;
+	
+	return vec4(final_sample.rgb, 1.0);
+}
+"""
+
+
+const SRC_PIXEL_CRUSHER: String = """
+uniform float u_pixel_grid_size = 128.0; // @label Pixel Grid Blocks | @min 16 | @max 512 | @sens 4
+uniform float u_color_depth_steps = 8.0; // @label Color Palette Bits | @min 2 | @max 32 | @sens 1
+uniform float u_dither_strength = 0.15; // @label Retro Dither Noise | @min 0.0 | @max 0.5 | @sens 0.01
+
+// Simple grid noise generator to create dithered checkerboard pixels
+float pixel_hash(vec2 p) {
+	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+}
+
+vec4 fx_pixel_crusher(vec2 uv) {
+	// 1. RESOLUTION CRUSH: Snap the smooth UV space to a low-res pixel grid blocks count
+	vec2 blocky_uv = floor(uv * u_pixel_grid_size) / u_pixel_grid_size;
+	
+	// Sample the scene texture at our blocky coordinate steps
+	vec4 pixel_color = texture(u_warped_texture, blocky_uv);
+	
+	// 2. RETRO DITHER: Calculate an old-school 50% checkerboard dither pattern to fake smooth shading
+	float dither = pixel_hash(floor(uv * u_pixel_grid_size)) * u_dither_strength;
+	pixel_color.rgb += vec3(dither - (u_dither_strength * 0.5));
+	
+	// 3. COLOR PALETTE CRUSH: Force the smooth color floats into blocky bit-depth chunks
+	pixel_color.r = floor(pixel_color.r * u_color_depth_steps) / u_color_depth_steps;
+	pixel_color.g = floor(pixel_color.g * u_color_depth_steps) / u_color_depth_steps;
+	pixel_color.b = floor(pixel_color.b * u_color_depth_steps) / u_color_depth_steps;
+	
+	return vec4(pixel_color.rgb, 1.0);
+}
+"""
+
+const SRC_VHS_GLITCH: String = """
+uniform float u_vhs_noise_mix = 0.15; // @label Tape Static Noise | @min 0.0 | @max 0.5 | @sens 0.01
+uniform float u_shake_frequency = 4.0; // @label Tracking Jitter | @min 0.0 | @max 15.0 | @sens 0.5
+uniform float u_chromatic_split = 0.008; // @label Color Bleeding | @min 0.0 | @max 0.04 | @sens 0.001
+uniform float u_glitch_frequency = 1.5; // @label Signal Tearing | @min 0.0 | @max 5.0 | @sens 0.1
+
+// Simple hash to generate pseudo-random values for tracking noise lines
+float vhs_hash(vec2 p) {
+	return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+}
+
+vec4 fx_vhs_glitch(vec2 uv) {
+	float t = u_time;
+	vec2 warped_uv = uv;
+	
+	// 1. Calculate horizontal pixel tearing strips using sine wave steps and noise
+	float tear_wave = sin(uv.y * 10.0 + t * u_shake_frequency) * cos(uv.y * 25.0 - t);
+	float tear_trigger = step(0.92, vhs_hash(vec2(floor(uv.y * 15.0), floor(t * 8.0))));
+	warped_uv.x += tear_wave * u_glitch_frequency * 0.02 * tear_trigger;
+	
+	// 2. Vertical tracking jitter (shakes the frame rapidly up and down based on a timer)
+	float vertical_shake = vhs_hash(vec2(floor(t * u_shake_frequency), 1.0)) * 0.004;
+	warped_uv.y += vertical_shake * step(0.85, vhs_hash(vec2(t, 0.0)));
+	
+	// 3. Chromatic Channel Bleeding (Simulates analog color misalignments)
+	// We separate the Red and Blue channels into separate lookup coordinates
+	float r_channel = texture(u_warped_texture, warped_uv + vec2(u_chromatic_split, 0.0)).r;
+	float g_channel = texture(u_warped_texture, warped_uv).g;
+	float b_channel = texture(u_warped_texture, warped_uv - vec2(u_chromatic_split, 0.0)).b;
+	vec3 analog_color = vec3(r_channel, g_channel, b_channel);
+	
+	// 4. Inject magnetic tape grain and snow static lines
+	float static_grain = vhs_hash(uv + vec2(t * 0.1));
+	float line_noise = step(0.98, vhs_hash(vec2(0.0, uv.y + t * 5.0))) * 0.3;
+	
+	// Blend the noise elements into the final canvas
+	vec3 final_color = mix(analog_color, vec3(static_grain), u_vhs_noise_mix);
+	final_color += vec3(line_noise) * u_vhs_noise_mix * 2.0;
+	
+	return vec4(final_color, 1.0);
+}
+"""
+
+
+const SRC_CRT_SCREEN: String = """
+uniform float u_scanline_density = 400.0; // @label Scanline Density | @min 50 | @max 1000 | @sens 10
+uniform float u_scanline_opacity = 0.25; // @label Scanline Opacity | @min 0.0 | @max 1.0 | @sens 0.02
+uniform float u_pixel_grille = 0.2; // @label RGB Mask Strength | @min 0.0 | @max 1.0 | @sens 0.02
+uniform float u_barrel_distortion = 0.08; // @label Screen Curvature | @min 0.0 | @max 0.4 | @sens 0.01
+uniform float u_vignette_hold = 0.6; // @label Screen Border Shadow | @min 0.1 | @max 1.0 | @sens 0.02
+
+// Helper function to simulate a curved CRT tube surface
+vec2 crt_curved_uv(vec2 uv) {
+	vec2 p = uv - 0.5;
+	float d = dot(p, p);
+	// Deform coordinates outward proportional to their squared distance from the center
+	p *= 1.0 + d * u_barrel_distortion;
+	return p + 0.5;
+}
+
+vec4 fx_crt_screen(vec2 uv) {
+	// 1. Apply Screen Curvature Distortion
+	vec2 warped_uv = crt_curved_uv(uv);
+	
+	// If the curved coordinates stretch past the physical screen bezel, clip to black
+	if (warped_uv.x < 0.0 || warped_uv.x > 1.0 || warped_uv.y < 0.0 || warped_uv.y > 1.0) {
+		return vec4(0.0, 0.0, 0.0, 1.0);
+	}
+	
+	// Sample the compiled scene texture from the previous passes
+	vec4 base_color = texture(u_warped_texture, warped_uv);
+	
+	// 2. Inject Horizontal Scanlines
+	float scanline = sin(warped_uv.y * u_scanline_density * 6.28318) * 0.5 + 0.5;
+	// Lerp based on user opacity preference
+	base_color.rgb = mix(base_color.rgb, base_color.rgb * scanline, u_scanline_opacity);
+	
+	// 3. Inject Vertical RGB Shadow Mask / Aperture Grille
+	float grille = sin(warped_uv.x * u_scanline_density * 1.5 * 6.28318) * 0.5 + 0.5;
+	base_color.rgb = mix(base_color.rgb, base_color.rgb * grille, u_pixel_grille);
+	
+	// 4. Subtle Screen Border Vignette Falloff
+	vec2 vig_uv = warped_uv * (1.0 - warped_uv.yx);
+	float vig = vig_uv.x * vig_uv.y * 15.0;
+	base_color.rgb *= pow(vig, u_vignette_hold);
+	
+	return base_color;
+}
+"""
+
+
+const SRC_FISHEYE_BULB: String = """
+uniform vec2 u_lens_center = vec2(0.5, 0.5); // @label Bulb Center | @min 0.0 | @max 1.0 | @sens 0.01
+uniform float u_lens_radius = 0.5; // @label Bulb Radius | @min 0.1 | @max 1.5 | @sens 0.02
+uniform float u_lens_power = 1.5; // @label Pinch Intensity | @min 0.1 | @max 4.0 | @sens 0.05
+
+vec2 fx_fisheye_bulb(vec2 uv) {
+	// Calculate the distance vector from the pixel to the center of our bulb lens
+	vec2 p = uv - u_lens_center;
+	float d = length(p);
+	
+	// Check if the current pixel coordinate falls within our lens bubble radius
+	if (d < u_lens_radius) {
+		// Normalize the coordinate space relative to the radius of the bulb
+		float norm_d = d / u_lens_radius;
+		
+		// Run a non-linear exponential warp factor on the normalized radius
+		float warp = pow(norm_d, u_lens_power);
+		
+		// Rescale the vector from the center based on the magnification power curve
+		return u_lens_center + normalize(p) * warp * u_lens_radius;
+	}
+	
+	// If outside the lens boundary, leave the coordinate tracking flat and untouched
+	return uv;
+}
+"""
+
+
+const SRC_FIELD_SHIFT: String = """
+uniform vec2 u_field_frequency = vec2(4.0, 4.0); // @label Wave Density | @min 0.5 | @max 16.0 | @sens 0.1
+uniform float u_field_strength = 0.05; // @label Glass Thickness | @min 0.0 | @max 0.25 | @sens 0.005
+uniform float u_shift_speed = 0.8; // @label Melt Speed | @min 0.0 | @max 3.0 | @sens 0.05
+uniform float u_wave_interlace = 2.0; // @label Wave Cross-Folding | @min 0.5 | @max 5.0 | @sens 0.05
+
+vec2 fx_field_shift(vec2 uv) {
+	float t = u_time * u_shift_speed;
+	
+	// Create cross-folding trigonometric vector forces
+	float force_x = sin(uv.x * u_field_frequency.x + t) * cos(uv.y * u_field_frequency.y * u_wave_interlace - t);
+	float force_y = cos(uv.y * u_field_frequency.y + t) * sin(uv.x * u_field_frequency.x * u_wave_interlace + t);
+	
+	// Recombine forces into a smooth displacement vector map
+	vec2 displacement = vec2(force_x, force_y) * u_field_strength;
+	
+	// Displace the lookup UV space smoothly
+	return uv + displacement;
+}
+"""
+
+
+const SRC_POLAR_KALEIDOSCOPE: String = """
+uniform float u_sectors = 8.0; // @label Radial Slices | @min 2.0 | @max 32.0 | @sens 1.0
+uniform float u_rings = 3.0; // @label Concentric Rings | @min 1.0 | @max 12.0 | @sens 1.0
+uniform float u_ring_zoom = 1.5; // @label Ring Scaling | @min 0.5 | @max 5.0 | @sens 0.05
+uniform float u_rotation_speed = 0.2; // @label Slice Spin Speed | @min -2.0 | @max 2.0 | @sens 0.05
+uniform float u_pulse_speed = 0.1; // @label Ring Pulse Speed | @min -1.0 | @max 1.0 | @sens 0.02
+
+vec2 fx_polar_kaleidoscope(vec2 uv) {
+	// Center the coordinates around (0.0, 0.0)
+	vec2 p = uv - 0.5;
+	
+	// Convert space into raw polar coordinates
+	float r = length(p);
+	float a = atan(p.y, p.x);
+	
+	// 1. REFLECTION PASS A: Mirror the Angular Space (Slices)
+	float angle_step = 6.2831853 / max(u_sectors, 1.0);
+	a += u_time * u_rotation_speed;
+	// Modulo space partitioning
+	float sector_id = floor(a / angle_step);
+	a = mod(a, angle_step);
+	// Abs creates the mirrored reflection fold down the center of each slice
+	a = abs(a - angle_step * 0.5);
+	
+	// 2. REFLECTION PASS B: Mirror the Radial Space (Rings)
+	float radius_step = 0.5 / max(u_rings, 1.0);
+	float shifting_r = r * u_ring_zoom + sin(u_time * u_pulse_speed) * 0.05;
+	// Divide radius into tile grids, mirroring back and forth across cell boundaries
+	float ring_id = floor(shifting_r / radius_step);
+	float local_r = mod(shifting_r, radius_step);
+	if (mod(ring_id, 2.0) == 1.0) {
+		local_r = radius_step - local_r;
+	}
+	
+	// Convert our twice-mirrored polar grid coordinates back to Cartesian UV space
+	vec2 warped_uv = vec2(cos(a), sin(a)) * local_r + 0.5;
+	
+	return warped_uv;
+}
+"""
+
+
+const SRC_DROSTE_SPIRAL: String = """
+uniform float u_branches = 1.0; // @label Spiral Branches | @min 1.0 | @max 5.0 | @sens 1.0
+uniform float u_twist_factor = 1.0; // @label Twist Tightness | @min -4.0 | @max 4.0 | @sens 0.05
+uniform float u_spiral_zoom = 0.8; // @label Vortex Zoom | @min 0.2 | @max 3.0 | @sens 0.05
+uniform float u_implode_speed = 0.2; // @label Inward Collapse Speed | @min -2.0 | @max 2.0 | @sens 0.05
+
+vec2 fx_droste_spiral(vec2 uv) {
+	// Center the coordinates around the vortex center
+	vec2 p = uv - 0.5;
+	
+	// Avoid mathematical undefined errors at the absolute center node
+	float r = max(length(p), 0.0001);
+	float a = atan(p.y, p.x);
+	
+	// Conformal Logarithmic Mapping Engine
+	// Taking the log of the radius stretches space into a linear timeline grid
+	float log_r = log(r);
+	
+	// Apply structural twists by combining our stretched logarithmic scale and radial angle
+	float spiral_x = (log_r * u_spiral_zoom) + (a * u_twist_factor * 0.1591549) - (u_time * u_implode_speed);
+	float spiral_y = (a * u_branches * 0.1591549) + (log_r * u_twist_factor * 0.1591549);
+	
+	// Map the coordinates back into standard texture repeating tile bounds
+	vec2 warped_uv = vec2(spiral_x, spiral_y);
+	
+	// Centering offset realignment mapping for subsequent pattern filters
+	return fract(warped_uv + 0.5);
+}
+"""
+
+
+const SRC_CHROMATIC_RIPPLE: String = """
+uniform float u_ripple_frequency = 8.0; // @label Wave Frequency | @min 1.0 | @max 30.0 | @sens 0.5
+uniform float u_ripple_strength = 0.03; // @label Distortion Power | @min 0.0 | @max 0.2 | @sens 0.002
+uniform float u_ripple_speed = 2.0; // @label Wave Velocity | @min 0.0 | @max 5.0 | @sens 0.05
+uniform vec2 u_ripple_axis = vec2(1.0, 0.0); // @label Wave Direction Vector | @min -1 | @max 1 | @sens 0.1
+
+vec2 fx_chromatic_ripple(vec2 uv) {
+	// Calculate a moving wave phase based on coordinate positioning and time
+	float alignment = dot(uv, normalize(u_ripple_axis));
+	float wave = sin(alignment * u_ripple_frequency - u_time * u_ripple_speed);
+	
+	// Create an organic warping displacement offset vector
+	vec2 offset = vec2(wave) * u_ripple_strength;
+	
+	// Shift coordinate lookups dynamically to create shimmering liquid glass ripples
+	return uv + offset;
+}
+"""
+
+
+const SRC_POLAR_MAP: String = """
+uniform float u_zoom = 1.0; // @label Tunnel Zoom | @min 0.2 | @max 5.0 | @sens 0.05
+uniform float u_repeats_radial = 2.0; // @label Ring Repeats | @min 0.5 | @max 8.0 | @sens 0.5
+uniform float u_spin_speed = 0.2; // @label Spin Speed | @min -2.0 | @max 2.0 | @sens 0.05
+uniform float u_tunnel_speed = 0.3; // @label Tunnel Fly Speed | @min -3.0 | @max 3.0 | @sens 0.05
+
+vec2 fx_polar_map(vec2 uv) {
+	// Center coordinates around (0.0, 0.0)
+	vec2 p = uv - 0.5;
+	
+	// Calculate the polar metrics: r (radius/distance) and a (angle/rotation)
+	float r = length(p);
+	float a = atan(p.y, p.x);
+	
+	// 1. Transform Radius into a continuous tunnel depth layout
+	// Inverting r makes the center fly forward or backward over time
+	float tunnel_depth = (1.0 / max(r, 0.001)) * u_zoom;
+	float radial_uv = tunnel_depth + (u_time * u_tunnel_speed);
+	
+	// 2. Transform Angle into a clean, normalized looping wrap (0.0 to 1.0)
+	// Adding time spins the polar coordinate mapping wheel smoothly
+	float angular_uv = (a + 3.14159265) / 6.2831853;
+	angular_uv = angular_uv * u_repeats_radial + (u_time * u_spin_speed);
+	
+	// Reassemble back into standard coordinate space for the next pass/texture read
+	return vec2(angular_uv, radial_uv);
+}
+"""
 
 
 const SRC_LINES_COSINE: String = """
@@ -446,7 +967,7 @@ vec4 fx_lines_cosine(vec2 uv) {
 	if (choice == 0) { distance_score = sdf_circle_lc(p, u_scale); }
 	else if (choice == 1) { distance_score = sdf_box_lc(p, vec2(u_scale)); }
 	else if (choice == 2) { distance_score = sdf_triangle_lc(p, u_scale * 1.2); }
-	else if (choice == 3) { distance_score = sdf_star_lc(p, u_scale * 1.3, 0.45); }
+	else if (choice == 3) { distance_score = sdf_star_lc(p, u_scale, 0.45); }
 	else { distance_score = sdf_hexagon_lc(p, u_scale); }
 	
 	float line_surface = abs(distance_score) - u_line_thickness;
@@ -509,7 +1030,7 @@ vec4 fx_lines_chrono(vec2 uv) {
 	if (choice == 0) { distance_score = sdf_circle_lch(p, u_scale); }
 	else if (choice == 1) { distance_score = sdf_box_lch(p, vec2(u_scale)); }
 	else if (choice == 2) { distance_score = sdf_triangle_lch(p, u_scale * 1.2); }
-	else if (choice == 3) { distance_score = sdf_star_lch(p, u_scale * 1.3, 0.45); }
+	else if (choice == 3) { distance_score = sdf_star_lch(p, u_scale, 0.45); }
 	else { distance_score = sdf_hexagon_lch(p, u_scale); }
 	
 	float line_surface = abs(distance_score) - u_line_thickness;
@@ -582,7 +1103,7 @@ vec4 fx_shapes_cosine(vec2 uv) {
 	if (choice == 0) { distance_score = sdf_circle_sc(p, u_scale); }
 	else if (choice == 1) { distance_score = sdf_box_sc(p, vec2(u_scale)); }
 	else if (choice == 2) { distance_score = sdf_triangle_sc(p, u_scale * 1.2); }
-	else if (choice == 3) { distance_score = sdf_star_sc(p, u_scale * 1.3, 0.45); }
+	else if (choice == 3) { distance_score = sdf_star_sc(p, u_scale, 0.45); }
 	else { distance_score = sdf_hexagon_sc(p, u_scale); }
 	
 	// Create a sharp cutout mask for the solid shape
@@ -645,7 +1166,7 @@ vec4 fx_shapes_chrono(vec2 uv) {
 	if (choice == 0) { distance_score = sdf_circle_sch(p, u_scale); }
 	else if (choice == 1) { distance_score = sdf_box_sch(p, vec2(u_scale)); }
 	else if (choice == 2) { distance_score = sdf_triangle_sch(p, u_scale * 1.2); }
-	else if (choice == 3) { distance_score = sdf_star_sch(p, u_scale * 1.3, 0.45); }
+	else if (choice == 3) { distance_score = sdf_star_sch(p, u_scale, 0.45); }
 	else { distance_score = sdf_hexagon_sch(p, u_scale); }
 	
 	float shape_mask = smoothstep(u_edge_softness, 0.0, distance_score);
