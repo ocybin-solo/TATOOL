@@ -14,8 +14,6 @@ var label_perf_monitor: Label
 # --- START MENU HOOKS ---
 var menu_overlay_panel: PanelContainer
 var menu_list_box: VBoxContainer
-var active_menu_categories: Array = []
-var active_menu_index: int = 0
 
 # --- OVERLAY LAYERING (menus always paint above the viewports) ---
 var ui_canvas_layer: CanvasLayer
@@ -25,7 +23,6 @@ var menu_center_host: CenterContainer
 # --- SELECT PASS OVERLAY HOOKS ---
 var select_pass_overlay_panel: PanelContainer
 var select_pass_list_box: VBoxContainer
-var select_pass_pending_index: int = 0
 const PASS_LABELS: Array = ["PASS 1: BASE PATTERN", "PASS 2: WARPING", "PASS 3: FILTERS"]
 
 # --- UNIFIED MENU STATE (only one overlay + one morphed button at a time) ---
@@ -58,11 +55,6 @@ var pass3_viewport: SubViewport
 var pass3_rect: ColorRect
 var pass3_material: ShaderMaterial
 
-# Global source caches to hold onto the real shader math while a pass is in bypass mode
-var real_p2_source: String = ""
-var real_p3_source: String = ""
-
-
 
 # Core State Trackers
 var current_preset: PatternPreset
@@ -71,6 +63,17 @@ var current_time: float = 0.0
 # SELECT & START State Trackers
 var active_shader_layer: int = 0 
 var is_menu_open: bool = false
+
+# --- SHADER LIBRARY PIPELINE STATE ---
+# ShaderLibrary.gd is the single source of truth for every menu. Per pass we track which
+# recipes are active (stack order), the uniform records of the last assembled shader, and
+# a value cache keyed by the final uniform name.
+const DEBUG_DUMMY_RECIPES: int = 12 # extra test formulas so long Tier 2 lists can be tested; set to 0 when done
+const MENU_PAGE_ROWS: int = 6       # rows visible at once before a menu list scrolls
+var library
+var pass_stack: Array = [[], [], []]
+var pass_records: Array = [[], [], []]
+var pass_values: Array = [{}, {}, {}]
 
 func _ready() -> void:
 	# 🌟 REGISTER GLOBAL NODE GROUP (Removes fixed-depth path dependencies)
@@ -282,7 +285,6 @@ func open_select_pass_menu() -> void:
 	is_menu_open = true
 	active_menu_kind = MenuKind.SELECT_PASS
 
-	select_pass_pending_index = active_shader_layer
 
 	menu_center_host.visible = true
 	select_pass_overlay_panel = PanelContainer.new()
@@ -326,9 +328,9 @@ func redraw_select_pass_menu() -> void:
 	label_title.add_theme_color_override("font_color", Color.ORANGE)
 	select_pass_list_box.add_child(label_title)
 
-	# Determine active states based on whether the materials are running bypass glass or real math
-	var p2_is_active = "u_segments" in pass2_material.shader.code
-	var p3_is_active = "u_glow_intensity" in pass3_material.shader.code
+	# Determine active states based on whether any formula is active in the pass
+	var p2_is_active = pass_stack[1].size() > 0
+	var p3_is_active = pass_stack[2].size() > 0
 	
 	var pass_statuses = [
 		"[ACTIVE]",
@@ -352,28 +354,14 @@ func redraw_select_pass_menu() -> void:
 
 func close_select_pass_menu(confirm: bool) -> void:
 	if confirm:
-		active_shader_layer = select_pass_pending_index
+		# The cursor row (last_tier1_index) IS the chosen pass. All tweaks route to it from now on.
+		active_shader_layer = control_panel.last_tier1_index
+		control_panel.uniform_values = pass_values[active_shader_layer]
+		control_panel.parsed_uniforms = []
+		control_panel.active_recipe_id = ""
 		control_panel.active_index = 0
 		control_panel.active_sub_channel = 0
 
-		var active_mat: ShaderMaterial = null
-		match active_shader_layer:
-			0: active_mat = pass1_material
-			1: active_mat = pass2_material
-			2: active_mat = pass3_material
-
-		if active_mat and active_mat.shader:
-			control_panel.load_shader_source(active_mat.shader.code)
-			for u_name in control_panel.uniform_values:
-				var val = active_mat.get_shader_parameter(u_name)
-				if val != null:
-					control_panel.uniform_values[u_name] = val
-		else:
-			control_panel.parsed_uniforms.clear()
-			control_panel.uniform_values.clear()
-
-	#control_panel.is_input_blocked = false
-	#control_panel.set_dpad_locked(false)
 	control_panel.update_status_readout()
 
 	is_menu_open = false
@@ -387,10 +375,9 @@ func close_select_pass_menu(confirm: bool) -> void:
 
 
 # ------------------------------------------------------------------
-# SHADER MENU — the existing fast-travel category menu, renamed and
-# folded into the same self-renaming-button / strict-input-isolation
-# contract as SELECT PASS above. Its category logic is untouched.
+# SHADER MENU -- the PWR button / system menu below is unchanged.
 # ------------------------------------------------------------------
+
 func _on_shader_menu_button_pressed() -> void:
 	# 🌟 THE ⏻ PWR TOGGLE: Master handler for the System Main Menu overlay
 	if control_panel.active_state == control_panel.ControlState.SYSTEM_MENU:
@@ -454,235 +441,368 @@ func redraw_system_power_menu() -> void:
 # FUNCTION END: _on_shader_menu_button_pressed
 
 
+# =========================================================================
+# SHADER LIBRARY PIPELINE (recipes -> one assembled shader per pass)
+# =========================================================================
+func _pass_material(p: int) -> ShaderMaterial:
+	match p:
+		0: return pass1_material
+		1: return pass2_material
+	return pass3_material
 
-func open_fast_travel_menu() -> void:
-	# 🌟 THE TRACKING BRAIN FIX: Force state tracking variables to register immediately
-	is_menu_open = true
-	active_menu_kind = MenuKind.SHADER_MENU
-	
-	var active_mat: ShaderMaterial = null
-	match active_shader_layer:
-		0: active_mat = pass1_material
-		1: active_mat = pass2_material
-		2: active_mat = pass3_material
-		
-	if active_mat and active_mat.shader:
-		control_panel.load_shader_source(active_mat.shader.code)
+## Rebuild one pass from its active recipe stack, then push every value into the material.
+func rebuild_pass(p: int) -> void:
+	var built: Dictionary = library.assemble_pass(p, pass_stack[p])
+	var new_shader := Shader.new()
+	new_shader.code = built["code"]
+	var mat: ShaderMaterial = _pass_material(p)
+	mat.shader = new_shader
+	pass_records[p] = built["uniforms"]
+	# Re-bind the texture inputs after a shader swap
+	if p == 1:
+		mat.set_shader_parameter("u_pattern_texture", pass1_viewport.get_texture())
+	elif p == 2:
+		mat.set_shader_parameter("u_warped_texture", pass2_viewport.get_texture())
+	library.apply_values(mat, pass_records[p], pass_values[p])
 
-	active_menu_categories = control_panel.shader_categories.keys()
-	if active_menu_categories.is_empty():
+## Add a formula to the active pass (single-select formulas replace whatever is there).
+func activate_recipe(id: String) -> void:
+	var p: int = active_shader_layer
+	if pass_stack[p].has(id):
 		return
-	active_menu_index = 0
-
-	menu_center_host.visible = true
-	
-	# If a cyan panel already exists, recycle its layout slots cleanly
-	if menu_overlay_panel and is_instance_valid(menu_overlay_panel):
-		if menu_list_box and is_instance_valid(menu_list_box):
-			for child in menu_list_box.get_children(): child.queue_free()
+	if library.is_stackable(id):
+		pass_stack[p].append(id)
 	else:
-		# Only build the outer chassis shell if it doesn't exist yet
-		menu_overlay_panel = PanelContainer.new()
-		menu_overlay_panel.custom_minimum_size = Vector2(340, 260)
-		var style = StyleBoxFlat.new()
-		style.bg_color = Color(0.02, 0.02, 0.04, 0.92)
-		style.set_border_width_all(2)
-		style.border_color = Color(0.0, 0.85, 1.0, 0.9)
-		style.set_corner_radius_all(8)
-		menu_overlay_panel.add_theme_stylebox_override("panel", style)
-		menu_center_host.add_child(menu_overlay_panel)
+		pass_stack[p] = [id]
+	rebuild_pass(p)
 
-		var panel_body = VBoxContainer.new()
-		panel_body.alignment = BoxContainer.ALIGNMENT_CENTER
-		menu_overlay_panel.add_child(panel_body)
+## Turn one formula off and put its values back to defaults so re-adding starts fresh.
+func remove_recipe(id: String) -> void:
+	var p: int = active_shader_layer
+	library.reset_values(pass_records[p], pass_values[p], id)
+	pass_stack[p].erase(id)
+	rebuild_pass(p)
 
-		menu_list_box = VBoxContainer.new()
-		menu_list_box.alignment = BoxContainer.ALIGNMENT_CENTER
-		panel_body.add_child(menu_list_box)
+## Tier 2 RESET: everything in the active pass back to defaults (effect passes go back to bypass).
+func reset_active_pass() -> void:
+	var p: int = active_shader_layer
+	pass_values[p].clear() # cleared in place so control_panel.uniform_values stays linked
+	if p != 0:
+		pass_stack[p].clear()
+	rebuild_pass(p)
 
-	redraw_fast_travel_menu()
+## Rows for the Tier 2 menu: [RESET], [GLOBALS], then every formula for the active pass.
+func get_formula_rows() -> Array:
+	var p: int = active_shader_layer
+	var rows: Array = []
+	rows.append({"kind": "reset", "label": "[ RESET ALL VALUES ]" if p == 0 else "[ RESET PASS TO BYPASS ]"})
+	rows.append({"kind": "globals", "label": "⚙ GLOBAL UNIFORMS"})
+	for r in library.recipes_for_pass(p):
+		rows.append({"kind": "recipe", "id": r["id"], "label": r["name"], "active": pass_stack[p].has(r["id"])})
+	return rows
 
-# FUNCTION END: open_fast_travel_menu
+## Enter Tier 2 with the cursor on the first formula (never on a reset row).
+func enter_formula_menu() -> void:
+	control_panel.last_tier2_index = mini(2, get_formula_rows().size() - 1)
+	open_formula_select_menu()
+
+## Build the Tier 3 list: a formula's own uniforms, or the pass's globals when recipe_id is "".
+func prepare_uniform_list(recipe_id: String) -> void:
+	var p: int = active_shader_layer
+	var list: Array
+	if recipe_id == "":
+		list = library.global_uniforms(pass_records[p])
+	else:
+		list = library.uniforms_for_recipe(pass_records[p], recipe_id)
+	control_panel.active_recipe_id = recipe_id
+	control_panel.parsed_uniforms = list
+	control_panel.active_index = 0
+	control_panel.last_tier3_index = 1 if not list.is_empty() else 0
+
+## Tier 3 row 0: reset globals / reset a Pass 1 pattern / remove an effect formula.
+func tier3_row0_action() -> void:
+	var p: int = active_shader_layer
+	var rid: String = control_panel.active_recipe_id
+	if rid == "":
+		for rec in library.global_uniforms(pass_records[p]):
+			pass_values[p][rec["name"]] = rec["default"]
+		library.apply_values(_pass_material(p), pass_records[p], pass_values[p])
+		redraw_fast_travel_menu()
+	elif p == 0:
+		library.reset_values(pass_records[p], pass_values[p], rid)
+		library.apply_values(_pass_material(p), pass_records[p], pass_values[p])
+		redraw_fast_travel_menu()
+	else:
+		remove_recipe(rid)
+		control_panel.active_state = control_panel.ControlState.TIER_2_FORMULA
+		open_formula_select_menu()
+
+func _tier3_row0_label() -> String:
+	if control_panel.active_recipe_id == "":
+		return "[ RESET GLOBALS ]"
+	if active_shader_layer == 0:
+		return "[ RESET TO DEFAULTS ]"
+	return "[ REMOVE THIS FORMULA ]"
+
+
+# =========================================================================
+# MENU DRAWING HELPERS
+# =========================================================================
+## Build (or recycle) the cyan overlay shell shared by Tiers 2 to 5.
+func _ensure_cyan_panel() -> void:
+	menu_center_host.visible = true
+	if is_instance_valid(menu_overlay_panel) and is_instance_valid(menu_list_box):
+		for child in menu_list_box.get_children(): child.queue_free()
+		return
+	if is_instance_valid(menu_overlay_panel):
+		menu_overlay_panel.queue_free()
+
+	menu_overlay_panel = PanelContainer.new()
+	menu_overlay_panel.custom_minimum_size = Vector2(340, 260)
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.02, 0.02, 0.04, 0.92)
+	style.set_border_width_all(2)
+	style.border_color = Color(0.0, 0.85, 1.0, 0.9)
+	style.set_corner_radius_all(8)
+	menu_overlay_panel.add_theme_stylebox_override("panel", style)
+	menu_center_host.add_child(menu_overlay_panel)
+
+	var panel_body = VBoxContainer.new()
+	panel_body.alignment = BoxContainer.ALIGNMENT_CENTER
+	menu_overlay_panel.add_child(panel_body)
+
+	menu_list_box = VBoxContainer.new()
+	menu_list_box.alignment = BoxContainer.ALIGNMENT_CENTER
+	panel_body.add_child(menu_list_box)
+
+func _add_menu_row(text: String, selected: bool, hl_color: Color = Color.YELLOW, dim_color: Color = Color.DARK_GRAY) -> void:
+	var lbl = Label.new()
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	if selected:
+		lbl.text = " ▶  %s  ◀ " % text
+		lbl.add_theme_color_override("font_color", hl_color)
+	else:
+		lbl.text = "    %s    " % text
+		lbl.add_theme_color_override("font_color", dim_color)
+	menu_list_box.add_child(lbl)
+
+func _add_scroll_hint(visible_hint: bool, arrow: String) -> void:
+	var lbl = Label.new()
+	lbl.text = arrow if visible_hint else " "
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.add_theme_color_override("font_color", Color.DIM_GRAY)
+	menu_list_box.add_child(lbl)
+
+## First visible row so the cursor stays inside a MENU_PAGE_ROWS-tall window.
+func _window_start(total: int, cursor: int) -> int:
+	if total <= MENU_PAGE_ROWS:
+		return 0
+	return clampi(cursor - int(MENU_PAGE_ROWS * 0.5), 0, total - MENU_PAGE_ROWS)
+
+## Compact number text: 1.1, 0.003, 12
+func _fmt(v: float) -> String:
+	var s: String = "%.5f" % v
+	return s.rstrip("0").rstrip(".")
+
+
+# =========================================================================
+# TIER 2 -- FORMULAS (+ GLOBALS + RESET)
+# =========================================================================
 func open_formula_select_menu() -> void:
 	is_menu_open = true
 	active_menu_kind = MenuKind.NONE # Disconnected from legacy toolbar tracking loops safely
-	menu_center_host.visible = true
-	
-	# Recycle the main cyan panel container cleanly to protect our layout dimensions
-	if menu_overlay_panel and is_instance_valid(menu_overlay_panel):
-		if menu_list_box and is_instance_valid(menu_list_box):
-			for child in menu_list_box.get_children(): child.queue_free()
-	else:
-		menu_overlay_panel = PanelContainer.new()
-		menu_overlay_panel.custom_minimum_size = Vector2(340, 260)
-		var style = StyleBoxFlat.new()
-		style.bg_color = Color(0.02, 0.02, 0.04, 0.92)
-		style.set_border_width_all(2)
-		style.border_color = Color(0.0, 0.85, 1.0, 0.9)
-		style.set_corner_radius_all(8)
-		menu_overlay_panel.add_theme_stylebox_override("panel", style)
-		menu_center_host.add_child(menu_overlay_panel)
-
-		var panel_body = VBoxContainer.new()
-		panel_body.alignment = BoxContainer.ALIGNMENT_CENTER
-		menu_overlay_panel.add_child(panel_body)
-
-		menu_list_box = VBoxContainer.new()
-		menu_list_box.alignment = BoxContainer.ALIGNMENT_CENTER
-		panel_body.add_child(menu_list_box)
-
+	_ensure_cyan_panel()
 	redraw_formula_select_menu()
 
 func redraw_formula_select_menu() -> void:
-	if not menu_list_box: return
+	if not is_instance_valid(menu_list_box): return
 	for child in menu_list_box.get_children(): child.queue_free()
-	
+
 	var label_title = Label.new()
 	label_title.text = " 🕹️ SELECT MATH RECIPE CARD "
 	label_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label_title.add_theme_color_override("font_color", Color.CHARTREUSE)
 	menu_list_box.add_child(label_title)
-	
-	# 🌟 THE REFINED TEXT MATRIX: Renamed bypass options to clean hardware reset toggles
-	var recipes: Array = []
-	match control_panel.last_tier1_index:
-		0: recipes = ["INIGO QUILEZ NOISE", "CELLULAR VORONOI MATRIX", "QUANTUM PLASMA WAVES"]
-		1: recipes = ["[ RESET ACTIVE FORMULA ]", "KALEIDOSCOPE REFLECTION", "FISHEYE RADIAL SWIRL"]
-		2: recipes = ["[ RESET ACTIVE FORMULA ]", "ANALOG EDGE GLOW FILTER", "CRT SCANLINE CHROMATIC"]
 
-	for i in range(recipes.size()):
-		var lbl = Label.new()
-		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		# Use your focus memory cache variable (last_tier2_index) to track the recipe cursor row
-		if i == control_panel.last_tier2_index:
-			lbl.text = " ▶  %s  ◀ " % recipes[i]
-			lbl.add_theme_color_override("font_color", Color.YELLOW)
-		else:
-			lbl.text = "    %s    " % recipes[i]
-			lbl.add_theme_color_override("font_color", Color.DARK_GRAY)
-		menu_list_box.add_child(lbl)
+	var rows: Array = get_formula_rows()
+	var cursor: int = control_panel.last_tier2_index
+	var start: int = _window_start(rows.size(), cursor)
+	var stop: int = mini(start + MENU_PAGE_ROWS, rows.size())
+	var scrolling: bool = rows.size() > MENU_PAGE_ROWS
 
-# FUNCTION END: redraw_formula_select_menu
+	if scrolling: _add_scroll_hint(start > 0, "▲")
+	for i in range(start, stop):
+		var row: Dictionary = rows[i]
+		var text: String = row["label"]
+		var hl: Color = Color.YELLOW
+		var dim: Color = Color.DARK_GRAY
+		if row["kind"] == "reset":
+			hl = Color.WHITE
+			dim = Color.LIGHT_GOLDENROD
+		elif row["kind"] == "recipe":
+			text = ("● " if row["active"] else "○ ") + text
+		_add_menu_row(text, i == cursor, hl, dim)
+	if scrolling: _add_scroll_hint(stop < rows.size(), "▼")
 
 func _step_formula_selection(direction: int) -> void:
-	# Both baseline noise, warping, and filter arrays contain exactly 3 slots right now
-	var total_available_recipes = 3 
-	
-	# Scroll the recipe focus variable cleanly across the boundaries
-	control_panel.last_tier2_index = posmod(control_panel.last_tier2_index + direction, total_available_recipes)
+	var total: int = get_formula_rows().size()
+	control_panel.last_tier2_index = posmod(control_panel.last_tier2_index + direction, total)
 	redraw_formula_select_menu()
 
-# FUNCTION END: _step_formula_selection
 
-
-	
-func _step_fast_travel_selection(direction: int) -> void:
-	# Total count adds 1 to account for our newly injected RESET command shortcut row
-	var total_available_rows = control_panel.parsed_uniforms.size() + 1
-	if total_available_rows <= 1: return
-	
-	# Scroll the cursor tracker variable cleanly across the expanded list bounds
-	control_panel.last_tier3_index = posmod(control_panel.last_tier3_index + direction, total_available_rows)
+# =========================================================================
+# TIER 3 -- UNIFORMS (a formula's own list, or GLOBALS)
+# =========================================================================
+func open_fast_travel_menu() -> void:
+	is_menu_open = true
+	active_menu_kind = MenuKind.SHADER_MENU
+	_ensure_cyan_panel()
 	redraw_fast_travel_menu()
 
-# FUNCTION END: _step_fast_travel_selection
+func _step_fast_travel_selection(direction: int) -> void:
+	if control_panel.parsed_uniforms.is_empty(): return
+	var total: int = control_panel.parsed_uniforms.size() + 1
+	control_panel.last_tier3_index = posmod(control_panel.last_tier3_index + direction, total)
+	redraw_fast_travel_menu()
 
 func redraw_fast_travel_menu() -> void:
-	if not menu_list_box: return
+	if not is_instance_valid(menu_list_box): return
 	for child in menu_list_box.get_children(): child.queue_free()
-	
+
+	var is_globals: bool = control_panel.active_recipe_id == ""
 	var label_title = Label.new()
-	label_title.text = " 🕹️ PARAMETER UNIFORMS LIST "
+	label_title.text = " ⚙ GLOBAL UNIFORMS " if is_globals else " 🕹️ PARAMETER UNIFORMS LIST "
 	label_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label_title.add_theme_color_override("font_color", Color.CYAN)
 	menu_list_box.add_child(label_title)
-	
-	var uniforms_list = control_panel.parsed_uniforms
-	var total_rows = uniforms_list.size() + 1
-	
+
+	var uniforms_list: Array = control_panel.parsed_uniforms
 	if uniforms_list.is_empty():
-		# 🌟 DYNAMIC RENDERING: If running an active clear-bypass glass shader, print the isolated reset rows header nicely
-		var is_highlighted = (0 == control_panel.last_tier3_index)
-		var lbl_reset = Label.new()
-		lbl_reset.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		if is_highlighted:
-			lbl_reset.text = " ▶  [ RESET ACTIVE EFFECTS ]  ◀ "
-			lbl_reset.add_theme_color_override("font_color", Color.WHITE)
-		else:
-			lbl_reset.text = "     [ RESET ACTIVE EFFECTS ]     "
-			lbl_reset.add_theme_color_override("font_color", Color.LIGHT_GOLDENROD)
-		menu_list_box.add_child(lbl_reset)
-		
 		var lbl_empty = Label.new()
-		lbl_empty.text = "    [ NO UNIFORMS DISCOVERED ]    "
+		lbl_empty.text = "    [ NO GLOBAL UNIFORMS IN THIS PASS YET ]    "
 		lbl_empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		lbl_empty.add_theme_color_override("font_color", Color.DARK_GRAY)
 		menu_list_box.add_child(lbl_empty)
 		return
 
-	for i in range(total_rows):
-		var lbl = Label.new()
-		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		var is_highlighted = (i == control_panel.last_tier3_index)
-		
+	var total_rows: int = uniforms_list.size() + 1
+	var cursor: int = control_panel.last_tier3_index
+	var start: int = _window_start(total_rows, cursor)
+	var stop: int = mini(start + MENU_PAGE_ROWS, total_rows)
+	var scrolling: bool = total_rows > MENU_PAGE_ROWS
+
+	if scrolling: _add_scroll_hint(start > 0, "▲")
+	for i in range(start, stop):
 		if i == 0:
-			# 🌟 TEXT OVERHAUL UPGRADE: Updated line label string exactly to match your hardware layout design requirements
-			if is_highlighted:
-				lbl.text = " ▶  [ RESET ACTIVE EFFECTS ]  ◀ "
-				lbl.add_theme_color_override("font_color", Color.WHITE)
-			else:
-				lbl.text = "     [ RESET ACTIVE EFFECTS ]     "
-				lbl.add_theme_color_override("font_color", Color.LIGHT_GOLDENROD)
+			_add_menu_row(_tier3_row0_label(), i == cursor, Color.WHITE, Color.LIGHT_GOLDENROD)
 		else:
-			var u_data = uniforms_list[i - 1]
-			if is_highlighted:
-				lbl.text = " ▶  %s  ◀ " % u_data["display_name"]
-				lbl.add_theme_color_override("font_color", Color.YELLOW)
-			else:
-				lbl.text = "    %s    " % u_data["display_name"]
-				lbl.add_theme_color_override("font_color", Color.DARK_GRAY)
-				
-		menu_list_box.add_child(lbl)
-
-# FUNCTION END: redraw_fast_travel_menu
+			_add_menu_row(String(uniforms_list[i - 1]["label"]).to_upper(), i == cursor)
+	if scrolling: _add_scroll_hint(stop < total_rows, "▼")
 
 
-		
-func close_fast_travel_menu() -> void:
-	if not menu_overlay_panel: return
-	
-	# Safety check: Ensure we actually have categories populated
-	if not active_menu_categories.is_empty() and active_menu_index < active_menu_categories.size():
-		var selected_cat = active_menu_categories[active_menu_index]
-		
-		# SAFE LOOKUP: Use .get() to prevent hard-crashes if a key is missing
-		var target_param_name = control_panel.shader_categories.get(selected_cat, "")
-		
-		if target_param_name != "":
-			# Walk the parsed uniforms array to find the index matching our parameter name
-			for idx in range(control_panel.parsed_uniforms.size()):
-				if control_panel.parsed_uniforms[idx]["name"] == target_param_name:
-					control_panel.active_index = idx
-					break
-		else:
-			print("⚠️ Fast-Travel: Category key '%s' not found in active UI cache." % selected_cat)
-			
-	# 🌟 RESTORE INPUT CHANNEL ACCESS SAFELY
-	#control_panel.is_input_blocked = false
-	#control_panel.set_dpad_locked(false)
+# =========================================================================
+# TIER 4 -- PARAMETERS (channels) OF ONE UNIFORM
+# =========================================================================
+func open_parameter_select_menu() -> void:
+	if not is_instance_valid(menu_list_box): return
+	for child in menu_list_box.get_children(): child.queue_free()
 
-	is_menu_open = false
-	active_menu_kind = MenuKind.NONE
-	btn_shader_menu.text = LABEL_SHADER_MENU_IDLE
-	menu_center_host.visible = false
+	var uniforms_list: Array = control_panel.parsed_uniforms
+	if uniforms_list.is_empty(): return
+	var rec: Dictionary = uniforms_list[control_panel.active_index]
 
-	# First real SHADER MENU use ends the onboarding boot ribbon.
-	control_panel.suppress_status_readout = false
-	control_panel.update_status_readout()
-	
-	# Clean up the UI overlay panel node from memory safely
-	menu_overlay_panel.queue_free()
-	menu_overlay_panel = null
+	var label_title = Label.new()
+	label_title.text = " 🕹️ %s: SELECT PARAMETER " % String(rec["label"]).to_upper()
+	label_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label_title.add_theme_color_override("font_color", Color.MAGENTA)
+	menu_list_box.add_child(label_title)
+
+	var channel_names: PackedStringArray = rec["channels"]
+	var current: Variant = control_panel.uniform_values.get(rec["name"], rec["default"])
+	for i in range(channel_names.size()):
+		var value_text: String = _fmt(library.get_component(current, rec["type"], i))
+		_add_menu_row("%s   [ %s ]" % [channel_names[i], value_text], i == control_panel.last_tier4_index)
+
+
+# =========================================================================
+# TIER 5 -- TWEAK CONSOLE (value, sensitivity, default, recommended sensitivity)
+# =========================================================================
+func open_live_tweak_console() -> void:
+	if not is_instance_valid(menu_list_box): return
+	for child in menu_list_box.get_children(): child.queue_free()
+
+	var uniforms_list: Array = control_panel.parsed_uniforms
+	if uniforms_list.is_empty(): return
+
+	var rec: Dictionary = uniforms_list[control_panel.active_index]
+	var channel_names: PackedStringArray = rec["channels"]
+	var idx: int = clampi(control_panel.last_tier4_index, 0, channel_names.size() - 1)
+	var raw_val: Variant = control_panel.uniform_values.get(rec["name"], rec["default"])
+	var display_value: float = library.get_component(raw_val, rec["type"], idx)
+
+	var label_title = Label.new()
+	label_title.text = " +═ PARAMETER TWEAK CONSOLE ═+ "
+	label_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label_title.add_theme_color_override("font_color", Color.ORANGE)
+	menu_list_box.add_child(label_title)
+
+	# 1. Name header (with the channel when the uniform has more than one)
+	var name_text: String = String(rec["label"]).to_upper()
+	if channel_names.size() > 1:
+		name_text += "  ·  " + channel_names[idx]
+	var lbl_name = Label.new()
+	lbl_name.text = " ║ NAME: %s " % name_text
+	lbl_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	menu_list_box.add_child(lbl_name)
+
+	# 2. Live value row (cursor row 0)
+	var lbl_val = Label.new()
+	if control_panel.last_tier5_row == 0:
+		lbl_val.text = " ▶ ║ VALUE: ◄ [ %s ] ► " % _fmt(display_value)
+		lbl_val.add_theme_color_override("font_color", Color.YELLOW)
+	else:
+		lbl_val.text = "    ║ VALUE:   [ %s ]   " % _fmt(display_value)
+		lbl_val.add_theme_color_override("font_color", Color.DARK_GRAY)
+	lbl_val.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	menu_list_box.add_child(lbl_val)
+
+	# 3. Sensitivity row (cursor row 1)
+	var lbl_sens = Label.new()
+	if control_panel.last_tier5_row == 1:
+		lbl_sens.text = " ▶ ║ SENS : ◄ [ %s ] ► " % _fmt(control_panel.sensitivity)
+		lbl_sens.add_theme_color_override("font_color", Color.YELLOW)
+	else:
+		lbl_sens.text = "    ║ SENS :   [ %s ]   " % _fmt(control_panel.sensitivity)
+		lbl_sens.add_theme_color_override("font_color", Color.DARK_GRAY)
+	lbl_sens.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	menu_list_box.add_child(lbl_sens)
+
+	var blank_spacer = Label.new()
+	blank_spacer.text = " ║                            ║ "
+	blank_spacer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	blank_spacer.add_theme_color_override("font_color", Color.DARK_GRAY)
+	menu_list_box.add_child(blank_spacer)
+
+	# 4. Static default value of THIS channel, straight from the shader's own default
+	var lbl_def_val = Label.new()
+	lbl_def_val.text = " ║ DEFAULT VAL : [ %s ]   ║ " % _fmt(library.default_component(rec, idx))
+	lbl_def_val.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl_def_val.add_theme_color_override("font_color", Color.DIM_GRAY)
+	menu_list_box.add_child(lbl_def_val)
+
+	# 5. Static recommended sensitivity for this uniform (from its @sens tag)
+	var lbl_rec_sens = Label.new()
+	lbl_rec_sens.text = " ║ RECOMMENDED SENS: [ %s ]   ║ " % _fmt(rec["sens"])
+	lbl_rec_sens.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl_rec_sens.add_theme_color_override("font_color", Color.DIM_GRAY)
+	menu_list_box.add_child(lbl_rec_sens)
+
+	var label_footer = Label.new()
+	label_footer.text = " +════════════════════════════+ "
+	label_footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label_footer.add_theme_color_override("font_color", Color.ORANGE)
+	menu_list_box.add_child(label_footer)
+
 
 func _process(delta: float) -> void:
 	current_time += delta
@@ -700,141 +820,6 @@ func _process(delta: float) -> void:
 	_check_hardware_gpu_safety()
 	
 	
-func open_parameter_select_menu() -> void:
-	if not menu_list_box: return
-	
-	# 🌟 THE WIPE: Clear the text list rows entirely before drawing the new sub-channels
-	for child in menu_list_box.get_children(): 
-		child.queue_free()
-	
-	var uniforms_list = control_panel.parsed_uniforms
-	if uniforms_list.is_empty(): return
-	var targeted_uniform = uniforms_list[control_panel.active_index]
-	
-	var label_title = Label.new()
-	label_title.text = " 🕹️ SELECT SUB-CHANNEL AXIS "
-	label_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label_title.add_theme_color_override("font_color", Color.MAGENTA)
-	menu_list_box.add_child(label_title)
-	
-	var u_type = targeted_uniform["type"]
-	var channels: Array = []
-	
-	if u_type == "float":
-		channels = ["MAIN VALUE Scalar"]
-	elif u_type == "vec2":
-		channels = ["HORIZONTAL AXIS [X]", "VERTICAL AXIS [Y]"]
-	elif u_type == "vec4":
-		channels = ["RED CHANNEL [R]", "GREEN CHANNEL [G]", "BLUE CHANNEL [B]", "ALPHA CHANNEL [A]"]
-
-	for i in range(channels.size()):
-		var lbl = Label.new()
-		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		if i == control_panel.last_tier4_index:
-			lbl.text = " ▶  %s  ◀ " % channels[i]
-			lbl.add_theme_color_override("font_color", Color.YELLOW)
-		else:
-			lbl.text = "    %s    " % channels[i]
-			lbl.add_theme_color_override("font_color", Color.DARK_GRAY)
-		menu_list_box.add_child(lbl)
-
-# FUNCTION END: open_parameter_select_menu
-
-
-
-func open_live_tweak_console() -> void:
-	if not menu_list_box: return
-	for child in menu_list_box.get_children(): child.queue_free()
-	
-	var uniforms_list = control_panel.parsed_uniforms
-	if uniforms_list.is_empty(): return
-	
-	# 🌟 THE SYNC: Point target extraction strictly onto the unified script calculation index
-	var targeted_uniform = uniforms_list[control_panel.active_index]
-	
-	var label_title = Label.new()
-	label_title.text = " +═ PARAMETER TWEAK CONSOLE ═+ "
-	label_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label_title.add_theme_color_override("font_color", Color.ORANGE)
-	menu_list_box.add_child(label_title)
-	
-	var u_name = targeted_uniform["name"]
-	var u_type = targeted_uniform["type"]
-	var raw_val = control_panel.uniform_values.get(u_name, 0.0)
-	
-	var display_value: float = 0.0
-	if u_type == "float":
-		display_value = float(raw_val)
-	elif u_type == "vec2" and raw_val is Vector2:
-		display_value = raw_val.x if control_panel.last_tier4_index == 0 else raw_val.y
-	elif u_type == "vec4" and raw_val is Color:
-		if control_panel.last_tier4_index == 0: display_value = raw_val.r
-		elif control_panel.last_tier4_index == 1: display_value = raw_val.g
-		elif control_panel.last_tier4_index == 2: display_value = raw_val.b
-		elif control_panel.last_tier4_index == 3: display_value = raw_val.a
-
-	# 1. Bounding Name Header Row
-	var lbl_name = Label.new()
-	lbl_name.text = " ║ NAME: %s " % targeted_uniform["display_name"]
-	lbl_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	menu_list_box.add_child(lbl_name)
-	
-	# 2. Live Value Adjuster Row (Focused on Row 0)
-	var lbl_val = Label.new()
-	if control_panel.last_tier5_row == 0:
-		lbl_val.text = " ▶ ║ VALUE: ◄ [ %.3f ] ► " % display_value
-		lbl_val.add_theme_color_override("font_color", Color.YELLOW)
-	else:
-		lbl_val.text = "    ║ VALUE:   [ %.3f ]   " % display_value
-		lbl_val.add_theme_color_override("font_color", Color.DARK_GRAY)
-	lbl_val.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	menu_list_box.add_child(lbl_val)
-	
-	# 3. Active Sensitivity Adjuster Row (Focused on Row 1)
-	var lbl_sens = Label.new()
-	if control_panel.last_tier5_row == 1:
-		lbl_sens.text = " ▶ ║ SENS : ◄ [ %.3f ] ► " % control_panel.sensitivity
-		lbl_sens.add_theme_color_override("font_color", Color.YELLOW)
-	else:
-		lbl_sens.text = "    ║ SENS :   [ %.3f ]   " % control_panel.sensitivity
-		lbl_sens.add_theme_color_override("font_color", Color.DARK_GRAY)
-	lbl_sens.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	menu_list_box.add_child(lbl_sens)
-	
-	# Spacer row to visually anchor static benchmark values cleanly
-	var blank_spacer = Label.new()
-	blank_spacer.text = " ║                            ║ "
-	blank_spacer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	blank_spacer.add_theme_color_override("font_color", Color.DARK_GRAY)
-	menu_list_box.add_child(blank_spacer)
-	
-	# 4. Static Factory Default Value benchmark line
-	var lbl_def_val = Label.new()
-	lbl_def_val.text = " ║ DEFAULT VAL : [ %.3f ]   ║ " % targeted_uniform["default_value"]
-	lbl_def_val.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl_def_val.add_theme_color_override("font_color", Color.DIM_GRAY)
-	menu_list_box.add_child(lbl_def_val)
-	
-	# 5. Static Factory Default Sensitivity benchmark line
-	var lbl_def_sens = Label.new()
-	lbl_def_sens.text = " ║ DEFAULT SENS: [ %.3f ]   ║ " % targeted_uniform["default_sensitivity"]
-	lbl_def_sens.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl_def_sens.add_theme_color_override("font_color", Color.DIM_GRAY)
-	menu_list_box.add_child(lbl_def_sens)
-
-	var label_footer = Label.new()
-	label_footer.text = " +════════════════════════════+ "
-	label_footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label_footer.add_theme_color_override("font_color", Color.ORANGE)
-	menu_list_box.add_child(label_footer)
-
-# FUNCTION END: open_live_tweak_console
-
-
-
-# =========================================================================
-# 🛡️ THE UPGRADED MOBILE VRAM SAFETY VALVE
-# =========================================================================
 func _check_hardware_gpu_safety() -> void:
 	# 1. Pull system resource usage metrics from the engine servers
 	var current_vram_mb = Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED) / 1024.0 / 1024.0
@@ -852,34 +837,31 @@ func _check_hardware_gpu_safety() -> void:
 	
 	# 3. Mobile Breaker Trip Point
 	var vram_safety_trip_point = 1000.0 # 1GB Limit
-	
+
 	if current_vram_mb > vram_safety_trip_point or current_fps < 30.0:
-		if pass1_material:
-			var active_detail = pass1_material.get_shader_parameter("u_noise_detail")
-			if active_detail != null and active_detail > 2.0:
-				pass1_material.set_shader_parameter("u_noise_detail", 2.0)
-				control_panel.uniform_values["u_noise_detail"] = 2.0
+		# The library prefixes formula uniforms as u_<recipe>_<name>
+		var detail_key: String = "u_fbm_noise_detail"
+		if pass_stack[0].has("fbm") and pass_values[0].has(detail_key):
+			var active_detail: float = float(pass_values[0][detail_key])
+			if active_detail > 2.0:
+				pass_values[0][detail_key] = 2.0
+				pass1_material.set_shader_parameter(detail_key, 2.0)
 				control_panel.update_status_readout()
-				
+
 				label_safety_alert.text = "⚠️ VRAM/PERFORMANCE OVERLOAD PREVENTED: CLAMPING NOISE DETAIL"
 				get_tree().create_timer(4.0).timeout.connect(func(): label_safety_alert.text = "")
-	
-	
-				
-func _on_ui_uniform_modified(u_name: String, u_value: Variant) -> void:
-	# Route the parameters dynamically based on which pass is currently selected
 
-				
-	match active_shader_layer:
-		0:
-			if pass1_material: pass1_material.set_shader_parameter(u_name, u_value)
-		1:
-			if pass2_material: pass2_material.set_shader_parameter(u_name, u_value)
-		2:
-			if pass3_material: pass3_material.set_shader_parameter(u_name, u_value)
-			
+
+func _on_ui_uniform_modified(u_name: String, u_value: Variant) -> void:
+	# Route the change to the pass that is currently selected and remember it in that pass's cache
+	var mat: ShaderMaterial = _pass_material(active_shader_layer)
+	if mat:
+		mat.set_shader_parameter(u_name, u_value)
+	pass_values[active_shader_layer][u_name] = u_value
+
 	# Cache the modified parameter into your current active preset resource for exports
 	current_preset.uniform_values[u_name] = u_value
+
 
 func save_current_pattern_preset() -> void:
 	var active_mat: ShaderMaterial = pass1_material if active_shader_layer == 0 else pass2_material
@@ -911,109 +893,14 @@ func save_current_pattern_preset() -> void:
 	control_panel.label_status.text = " ✅ COPIED %d PARAMETERS FROM %s TO CLIPBOARD! " % [active_params.size(), layer_label]
 
 func load_default_test_shaders() -> void:
-	# =========================================================================
-	# PASS 1: INIGO QUILEZ DOMAIN WARPING (GENERATIVE MATH) - Active by default
-	# =========================================================================
-	var p1_src = """
-	shader_type canvas_item;
-	uniform float u_time;
-	uniform vec2 u_warp_frequency = vec2(2.5, 2.5);
-	uniform float u_warp_strength = 1.1;
-	uniform float u_noise_detail = 4.0;
-	uniform float u_flow_speed = 0.4;
-	uniform vec4 u_pattern_color : source_color = vec4(0.1, 0.7, 0.9, 1.0);
-	
-	float hash2d(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
-	float value_noise(vec2 p) {
-		vec2 i = floor(p); vec2 f = fract(p);
-		vec2 u = f * f * (3.0 - 2.0 * f);
-		return mix(mix(hash2d(i + vec2(0.0, 0.0)), hash2d(i + vec2(1.0, 0.0)), u.x),
-				   mix(hash2d(i + vec2(0.0, 1.0)), hash2d(i + vec2(1.0, 1.0)), u.x), u.y);
-	}
-	float fbm(vec2 p) {
-		float value = 0.0; float amplitude = 0.5; float frequency = 1.0;
-		for (int i = 0; i < 5; i++) {
-			if (float(i) >= u_noise_detail) break;
-			value += amplitude * value_noise(p * frequency);
-			frequency *= 2.0; amplitude *= 0.5;
-		}
-		return value;
-	}
-	void fragment() {
-		vec2 st = UV * u_warp_frequency;
-		float scaled_time = u_time * u_flow_speed;
-		vec2 q = vec2(fbm(st + vec2(scaled_time * 0.2)), fbm(st + vec2(5.2, 1.3) + vec2(scaled_time * 0.15)));
-		vec2 r = vec2(fbm(st + u_warp_strength * q + vec2(1.7, 9.2) + vec2(scaled_time * 0.3)), fbm(st + u_warp_strength * q + vec2(8.3, 2.8) + vec2(scaled_time * 0.05)));
-		float final_field_math = fbm(st + u_warp_strength * r);
-		vec4 core_bg = mix(vec4(0.02, 0.02, 0.05, 1.0), vec4(0.12, 0.0, 0.22, 1.0), clamp(length(q), 0.0, 1.0));
-		COLOR = mix(core_bg, u_pattern_color, final_field_math) * (final_field_math * 1.5 + 0.3);
-	}
-	"""
-	
-	# =========================================================================
-	# PASS 2: GEOMETRIC KALEIDOSCOPE WARP (Backed up into cache string)
-	# =========================================================================
-	real_p2_source = """
-	shader_type canvas_item;
-	uniform sampler2D u_pattern_texture : filter_linear;
-	uniform float u_time;
-	uniform float u_segments = 6.0;
-	uniform float u_rotation_speed = 0.2;
-	
-	void fragment() {
-		vec2 uv = UV - 0.5;
-		float r = length(uv);
-		float a = atan(uv.y, uv.x) + (u_time * u_rotation_speed);
-		float angle_step = 2.0 * 3.14159265 / max(u_segments, 1.0);
-		a = mod(a, angle_step);
-		a = abs(a - angle_step * 0.5);
-		vec2 warped_uv = vec2(cos(a), sin(a)) * r + 0.5;
-		warped_uv = clamp(warped_uv, 0.001, 0.999);
-		COLOR = texture(u_pattern_texture, warped_uv);
-	}
-	"""
-	
-	# =========================================================================
-	# PASS 3: ANALOG EDGE GLOW FILTER (Backed up into cache string)
-	# =========================================================================
-	real_p3_source = """
-	shader_type canvas_item;
-	uniform sampler2D u_warped_texture : filter_linear;
-	uniform float u_time;
-	uniform float u_edge_threshold = 0.15;
-	uniform float u_glow_intensity = 2.5;
-	uniform vec2 u_step_offset = vec2(0.003, 0.003);
-	
-	void fragment() {
-		vec2 uv = UV;
-		vec4 center_color = texture(u_warped_texture, uv);
-		float c  = (center_color.r + center_color.g + center_color.b) / 3.0;
-		float left  = (texture(u_warped_texture, uv - vec2(u_step_offset.x, 0.0)).g);
-		float right = (texture(u_warped_texture, uv + vec2(u_step_offset.x, 0.0)).g);
-		float up    = (texture(u_warped_texture, uv - vec2(0.0, u_step_offset.y)).g);
-		float down  = (texture(u_warped_texture, uv + vec2(0.0, u_step_offset.y)).g);
-		float edge_delta = abs(c - left) + abs(c - right) + abs(c - up) + abs(c - down);
-		float edge_mask = smoothstep(u_edge_threshold, u_edge_threshold + 0.1, edge_delta);
-		vec3 glowing_borders = center_color.rgb * edge_mask * u_glow_intensity;
-		COLOR = vec4(center_color.rgb + glowing_borders, center_color.a);
-	}
-	"""
-	
-	# 🌟 THE CLEAN PASS-THROUGH BOOT BYPASS STRINTS
-	var p2_bypass = "shader_type canvas_item; uniform sampler2D u_pattern_texture; void fragment() { COLOR = texture(u_pattern_texture, UV); }"
-	var p3_bypass = "shader_type canvas_item; uniform sampler2D u_warped_texture; void fragment() { COLOR = texture(u_warped_texture, UV); }"
-	
-	var s1 = Shader.new(); s1.code = p1_src
-	var s2 = Shader.new(); s2.code = p2_bypass # Loaded as clear window glass
-	var s3 = Shader.new(); s3.code = p3_bypass # Loaded as clear window glass
-	
-	pass1_material.shader = s1
-	pass2_material.shader = s2
-	pass3_material.shader = s3
-	
-	pass2_material.set_shader_parameter("u_pattern_texture", pass1_viewport.get_texture())
-	pass3_material.set_shader_parameter("u_warped_texture", pass2_viewport.get_texture())
-	
-	control_panel.load_shader_source(p1_src)
+	# Boot: build all three passes from the recipe library. Pass 1 starts on the FBM pattern;
+	# Passes 2 and 3 start empty (clear-glass bypass) until a formula is chosen in Tier 2.
+	library = load("res://ShaderLibrary.gd").new()
+	if DEBUG_DUMMY_RECIPES > 0:
+		library.add_dummy_recipes(DEBUG_DUMMY_RECIPES)
 
-# FUNCTION END: load_default_test_shaders
+	pass_stack = [["fbm"], [], []]
+	for p in range(3):
+		rebuild_pass(p)
+
+	control_panel.uniform_values = pass_values[active_shader_layer]
