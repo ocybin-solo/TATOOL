@@ -374,11 +374,481 @@ func _register_builtin_recipes() -> void:
 	_register("plasma_chrono", PASS_PATTERN, "PLASMA: CHRONO MORPH", SRC_PLASMA_CHRONO, false)   
 	_register("plasma_cyber", PASS_PATTERN, "PLASMA: CYBER VEINS", SRC_PLASMA_CYBER, false)     
 	
+	# 5. Basic Shapes 
+	# Geometry Engines
+	_register("shapes_static", PASS_PATTERN, "GEOMETRY: SOLID SHAPES", SRC_BASIC_SHAPES, false)
+	_register("shapes_cosine", PASS_PATTERN, "GEOMETRY: SOLID COSINE", SRC_SHAPES_COSINE, false) 
+	_register("shapes_chrono", PASS_PATTERN, "GEOMETRY: SOLID CHRONO", SRC_SHAPES_CHRONO, false) 
+	
+	# Hollow Wireframe Geometry
+	_register("shapes_lines", PASS_PATTERN, "GEOMETRY: HOLLOW WIREFRAMES", SRC_BASIC_LINES, false)
+	_register("lines_cosine", PASS_PATTERN, "GEOMETRY: WIREFRAME COSINE", SRC_LINES_COSINE, false) 
+	_register("lines_chrono", PASS_PATTERN, "GEOMETRY: WIREFRAME CHRONO", SRC_LINES_CHRONO, false)  
+ 
+
+
+	
 	# Pass 2 & 3 Modules
 	_register("kaleidoscope", PASS_WARP, "KALEIDOSCOPE REFLECTION", SRC_KALEIDOSCOPE, true)
 	_register("swirl", PASS_WARP, "RADIAL SWIRL", SRC_SWIRL, true)
 	_register("edge_glow", PASS_FILTER, "ANALOG EDGE GLOW", SRC_EDGE_GLOW, false)
 
+
+const SRC_LINES_COSINE: String = """
+uniform float u_shape_type = 0.0; // @label Shape Selector | @min 0 | @max 4 | @sens 1
+uniform vec2 u_position = vec2(0.0, 0.0); // @label Position Offset | @min -1 | @max 1 | @sens 0.01
+uniform float u_scale = 0.35; // @label Shape Scale | @min 0.05 | @max 1.0 | @sens 0.01
+uniform float u_rotation = 0.0; // @label Rotation | @min -3.1416 | @max 3.1416 | @sens 0.05
+uniform float u_edge_softness = 0.01; // @label Edge Blur | @min 0.001 | @max 0.2 | @sens 0.001
+uniform float u_line_thickness = 0.02; // @label Line Thickness | @min 0.005 | @max 0.2 | @sens 0.002
+uniform float u_palette_frequency = 4.0; // @label Color Ring Density | @min 0.5 | @max 15.0 | @sens 0.1
+uniform float u_color_cycle_speed = 0.5; // @label Color Cycle Speed | @min 0 | @max 3 | @sens 0.05
+
+uniform vec4 u_color_a : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label Wave Center | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_b : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label Wave Amplitude | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_c : source_color = vec4(1.0, 1.0, 1.0, 1.0); // @label Wave Frequency | @min 0 | @max 2 | @sens 0.02
+uniform vec4 u_color_d : source_color = vec4(0.0, 0.33, 0.67, 1.0); // @label Wave Phase | @min 0 | @max 1 | @sens 0.02
+
+vec2 lcos_rotate(vec2 p, float angle) {
+	float s = sin(angle); float c = cos(angle);
+	return vec2(p.x * c - p.y * s, p.x * s + p.y * c);
+}
+
+float sdf_circle_lc(vec2 p, float r) { return length(p) - r; }
+float sdf_box_lc(vec2 p, vec2 b) {
+	vec2 d = abs(p) - b;
+	return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
+}
+float sdf_triangle_lc(vec2 p, float r) {
+	float k = sqrt(3.0); p.x = abs(p.x) - r; p.y = p.y + r / k;
+	if (p.x + k * p.y > 0.0) p = vec2(p.x - k * p.y, -k * p.x - p.y) / 2.0;
+	p.x -= clamp(p.x, -2.0 * r, 0.0); return -length(p) * sign(p.y);
+}
+float sdf_star_lc(vec2 p, float r, float rf) {
+	vec2 k1 = vec2(0.80901699437, -0.58778525229); vec2 k2 = vec2(-0.30901699437, 0.95105651629);
+	p.x = abs(p.x); p -= 2.0 * max(dot(k1, p), 0.0) * k1; p -= 2.0 * max(dot(k2, p), 0.0) * k2; p.x = abs(p.x);
+	vec2 ba = rf * vec2(-k1.y, k1.x) - vec2(0.0, r); vec2 pa = p - vec2(0.0, r);
+	float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0); return length(pa - ba * h) * sign(pa.x * ba.y - pa.y * ba.x);
+}
+float sdf_hexagon_lc(vec2 p, float r) {
+	vec3 k = vec3(-0.866025404, 0.5, 0.577350269); p = abs(p);
+	p -= 2.0 * min(dot(k.xy, p), 0.0) * k.xy; p -= vec2(clamp(p.x, -k.z * r, k.z * r), r);
+	return length(p) * sign(p.y);
+}
+
+vec4 fx_lines_cosine(vec2 uv) {
+	vec2 p = uv - 0.5 - u_position;
+	p = lcos_rotate(p, u_rotation);
+	
+	float distance_score = 0.0;
+	int choice = int(floor(u_shape_type + 0.5));
+	
+	if (choice == 0) { distance_score = sdf_circle_lc(p, u_scale); }
+	else if (choice == 1) { distance_score = sdf_box_lc(p, vec2(u_scale)); }
+	else if (choice == 2) { distance_score = sdf_triangle_lc(p, u_scale * 1.2); }
+	else if (choice == 3) { distance_score = sdf_star_lc(p, u_scale * 1.3, 0.45); }
+	else { distance_score = sdf_hexagon_lc(p, u_scale); }
+	
+	float line_surface = abs(distance_score) - u_line_thickness;
+	float line_mask = smoothstep(u_edge_softness, 0.0, line_surface);
+	
+	// Drive the color phase globally using the base distance vector
+	float t = (distance_score * u_palette_frequency) + (u_time * u_color_cycle_speed);
+	vec3 cos_color = u_color_a.rgb + u_color_b.rgb * cos(6.28318 * (u_color_c.rgb * t + u_color_d.rgb));
+	
+	return vec4(cos_color * line_mask, 1.0);
+}
+"""
+const SRC_LINES_CHRONO: String = """
+uniform float u_shape_type = 0.0; // @label Shape Selector | @min 0 | @max 4 | @sens 1
+uniform vec2 u_position = vec2(0.0, 0.0); // @label Position Offset | @min -1 | @max 1 | @sens 0.01
+uniform float u_scale = 0.35; // @label Shape Scale | @min 0.05 | @max 1.0 | @sens 0.01
+uniform float u_rotation = 0.0; // @label Rotation | @min -3.1416 | @max 3.1416 | @sens 0.05
+uniform float u_edge_softness = 0.01; // @label Edge Blur | @min 0.001 | @max 0.2 | @sens 0.001
+uniform float u_line_thickness = 0.02; // @label Line Thickness | @min 0.005 | @max 0.2 | @sens 0.002
+uniform float u_color_morph_speed = 0.6; // @label Color Morph Speed | @min 0 | @max 4 | @sens 0.05
+
+uniform vec4 u_color_bg : source_color = vec4(0.01, 0.01, 0.03, 1.0); // @label Background Color | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_line : source_color = vec4(0.1, 0.5, 1.0, 1.0); // @label Wireframe Core | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_glow : source_color = vec4(0.0, 1.0, 0.6, 1.0); // @label Filament Highlight | @min 0 | @max 1 | @sens 0.02
+
+vec2 lchro_rotate(vec2 p, float angle) {
+	float s = sin(angle); float c = cos(angle);
+	return vec2(p.x * c - p.y * s, p.x * s + p.y * c);
+}
+
+float sdf_circle_lch(vec2 p, float r) { return length(p) - r; }
+float sdf_box_lch(vec2 p, vec2 b) {
+	vec2 d = abs(p) - b;
+	return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
+}
+float sdf_triangle_lch(vec2 p, float r) {
+	float k = sqrt(3.0); p.x = abs(p.x) - r; p.y = p.y + r / k;
+	if (p.x + k * p.y > 0.0) p = vec2(p.x - k * p.y, -k * p.x - p.y) / 2.0;
+	p.x -= clamp(p.x, -2.0 * r, 0.0); return -length(p) * sign(p.y);
+}
+float sdf_star_lch(vec2 p, float r, float rf) {
+	vec2 k1 = vec2(0.80901699437, -0.58778525229); vec2 k2 = vec2(-0.30901699437, 0.95105651629);
+	p.x = abs(p.x); p -= 2.0 * max(dot(k1, p), 0.0) * k1; p -= 2.0 * max(dot(k2, p), 0.0) * k2; p.x = abs(p.x);
+	vec2 ba = rf * vec2(-k1.y, k1.x) - vec2(0.0, r); vec2 pa = p - vec2(0.0, r);
+	float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0); return length(pa - ba * h) * sign(pa.x * ba.y - pa.y * ba.x);
+}
+float sdf_hexagon_lch(vec2 p, float r) {
+	vec3 k = vec3(-0.866025404, 0.5, 0.577350269); p = abs(p);
+	p -= 2.0 * min(dot(k.xy, p), 0.0) * k.xy; p -= vec2(clamp(p.x, -k.z * r, k.z * r), r);
+	return length(p) * sign(p.y);
+}
+
+vec4 fx_lines_chrono(vec2 uv) {
+	vec2 p = uv - 0.5 - u_position;
+	p = lchro_rotate(p, u_rotation);
+	
+	float distance_score = 0.0;
+	int choice = int(floor(u_shape_type + 0.5));
+	
+	if (choice == 0) { distance_score = sdf_circle_lch(p, u_scale); }
+	else if (choice == 1) { distance_score = sdf_box_lch(p, vec2(u_scale)); }
+	else if (choice == 2) { distance_score = sdf_triangle_lch(p, u_scale * 1.2); }
+	else if (choice == 3) { distance_score = sdf_star_lch(p, u_scale * 1.3, 0.45); }
+	else { distance_score = sdf_hexagon_lch(p, u_scale); }
+	
+	float line_surface = abs(distance_score) - u_line_thickness;
+	float line_mask = smoothstep(u_edge_softness, 0.0, line_surface);
+	
+	// Isolate the exact internal center core of the stroke wire path
+	float core_filament = smoothstep(u_line_thickness * 0.4, 0.0, abs(distance_score)) * line_mask;
+	
+	// Calculate color morph timeline values
+	float timeline = sin(u_time * u_color_morph_speed) * 0.5 + 0.5;
+	vec4 morphing_wire = mix(u_color_line, u_color_glow, timeline);
+	vec4 morphing_bg = mix(u_color_bg, u_color_line * 0.15, timeline * 0.3);
+	
+	vec4 final_color = mix(morphing_bg, morphing_wire, line_mask);
+	final_color = mix(final_color, u_color_glow, core_filament * 0.8);
+	
+	return final_color;
+}
+"""
+
+
+const SRC_SHAPES_COSINE: String = """
+uniform float u_shape_type = 0.0; // @label Shape Selector | @min 0 | @max 4 | @sens 1
+uniform vec2 u_position = vec2(0.0, 0.0); // @label Position Offset | @min -1 | @max 1 | @sens 0.01
+uniform float u_scale = 0.35; // @label Shape Scale | @min 0.05 | @max 1.0 | @sens 0.01
+uniform float u_rotation = 0.0; // @label Rotation | @min -3.1416 | @max 3.1416 | @sens 0.05
+uniform float u_edge_softness = 0.01; // @label Edge Blur | @min 0.001 | @max 0.2 | @sens 0.001
+uniform float u_palette_frequency = 4.0; // @label Color Ring Density | @min 0.5 | @max 15.0 | @sens 0.1
+uniform float u_color_cycle_speed = 0.5; // @label Color Cycle Speed | @min 0 | @max 3 | @sens 0.05
+
+uniform vec4 u_color_a : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label Wave Center | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_b : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label Wave Amplitude | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_c : source_color = vec4(1.0, 1.0, 1.0, 1.0); // @label Wave Frequency | @min 0 | @max 2 | @sens 0.02
+uniform vec4 u_color_d : source_color = vec4(0.0, 0.33, 0.67, 1.0); // @label Wave Phase | @min 0 | @max 1 | @sens 0.02
+
+vec2 scos_rotate(vec2 p, float angle) {
+	float s = sin(angle); float c = cos(angle);
+	return vec2(p.x * c - p.y * s, p.x * s + p.y * c);
+}
+
+float sdf_circle_sc(vec2 p, float r) { return length(p) - r; }
+float sdf_box_sc(vec2 p, vec2 b) {
+	vec2 d = abs(p) - b;
+	return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
+}
+float sdf_triangle_sc(vec2 p, float r) {
+	float k = sqrt(3.0); p.x = abs(p.x) - r; p.y = p.y + r / k;
+	if (p.x + k * p.y > 0.0) p = vec2(p.x - k * p.y, -k * p.x - p.y) / 2.0;
+	p.x -= clamp(p.x, -2.0 * r, 0.0); return -length(p) * sign(p.y);
+}
+float sdf_star_sc(vec2 p, float r, float rf) {
+	vec2 k1 = vec2(0.80901699437, -0.58778525229); vec2 k2 = vec2(-0.30901699437, 0.95105651629);
+	p.x = abs(p.x); p -= 2.0 * max(dot(k1, p), 0.0) * k1; p -= 2.0 * max(dot(k2, p), 0.0) * k2; p.x = abs(p.x);
+	vec2 ba = rf * vec2(-k1.y, k1.x) - vec2(0.0, r); vec2 pa = p - vec2(0.0, r);
+	float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0); return length(pa - ba * h) * sign(pa.x * ba.y - pa.y * ba.x);
+}
+float sdf_hexagon_sc(vec2 p, float r) {
+	vec3 k = vec3(-0.866025404, 0.5, 0.577350269); p = abs(p);
+	p -= 2.0 * min(dot(k.xy, p), 0.0) * k.xy; p -= vec2(clamp(p.x, -k.z * r, k.z * r), r);
+	return length(p) * sign(p.y);
+}
+
+vec4 fx_shapes_cosine(vec2 uv) {
+	vec2 p = uv - 0.5 - u_position;
+	p = scos_rotate(p, u_rotation);
+	
+	float distance_score = 0.0;
+	int choice = int(floor(u_shape_type + 0.5));
+	
+	if (choice == 0) { distance_score = sdf_circle_sc(p, u_scale); }
+	else if (choice == 1) { distance_score = sdf_box_sc(p, vec2(u_scale)); }
+	else if (choice == 2) { distance_score = sdf_triangle_sc(p, u_scale * 1.2); }
+	else if (choice == 3) { distance_score = sdf_star_sc(p, u_scale * 1.3, 0.45); }
+	else { distance_score = sdf_hexagon_sc(p, u_scale); }
+	
+	// Create a sharp cutout mask for the solid shape
+	float shape_mask = smoothstep(u_edge_softness, 0.0, distance_score);
+	
+	// Pass the spatial distance field value into our cyclical cosine generator
+	float t = (distance_score * u_palette_frequency) + (u_time * u_color_cycle_speed);
+	vec3 cos_color = u_color_a.rgb + u_color_b.rgb * cos(6.28318 * (u_color_c.rgb * t + u_color_d.rgb));
+	
+	// Black out the area outside the shape boundary
+	return vec4(cos_color * shape_mask, 1.0);
+}
+"""
+const SRC_SHAPES_CHRONO: String = """
+uniform float u_shape_type = 0.0; // @label Shape Selector | @min 0 | @max 4 | @sens 1
+uniform vec2 u_position = vec2(0.0, 0.0); // @label Position Offset | @min -1 | @max 1 | @sens 0.01
+uniform float u_scale = 0.35; // @label Shape Scale | @min 0.05 | @max 1.0 | @sens 0.01
+uniform float u_rotation = 0.0; // @label Rotation | @min -3.1416 | @max 3.1416 | @sens 0.05
+uniform float u_edge_softness = 0.01; // @label Edge Blur | @min 0.001 | @max 0.2 | @sens 0.001
+uniform float u_color_morph_speed = 0.6; // @label Color Morph Speed | @min 0 | @max 4 | @sens 0.05
+
+uniform vec4 u_color_bg : source_color = vec4(0.01, 0.01, 0.03, 1.0); // @label Background Color | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_shape : source_color = vec4(0.9, 0.2, 0.4, 1.0); // @label Shape Core | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_rim : source_color = vec4(0.0, 1.0, 0.8, 1.0); // @label Rim Highlight | @min 0 | @max 1 | @sens 0.02
+
+vec2 schro_rotate(vec2 p, float angle) {
+	float s = sin(angle); float c = cos(angle);
+	return vec2(p.x * c - p.y * s, p.x * s + p.y * c);
+}
+
+float sdf_circle_sch(vec2 p, float r) { return length(p) - r; }
+float sdf_box_sch(vec2 p, vec2 b) {
+	vec2 d = abs(p) - b;
+	return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
+}
+float sdf_triangle_sch(vec2 p, float r) {
+	float k = sqrt(3.0); p.x = abs(p.x) - r; p.y = p.y + r / k;
+	if (p.x + k * p.y > 0.0) p = vec2(p.x - k * p.y, -k * p.x - p.y) / 2.0;
+	p.x -= clamp(p.x, -2.0 * r, 0.0); return -length(p) * sign(p.y);
+}
+float sdf_star_sch(vec2 p, float r, float rf) {
+	vec2 k1 = vec2(0.80901699437, -0.58778525229); vec2 k2 = vec2(-0.30901699437, 0.95105651629);
+	p.x = abs(p.x); p -= 2.0 * max(dot(k1, p), 0.0) * k1; p -= 2.0 * max(dot(k2, p), 0.0) * k2; p.x = abs(p.x);
+	vec2 ba = rf * vec2(-k1.y, k1.x) - vec2(0.0, r); vec2 pa = p - vec2(0.0, r);
+	float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0); return length(pa - ba * h) * sign(pa.x * ba.y - pa.y * ba.x);
+}
+float sdf_hexagon_sch(vec2 p, float r) {
+	vec3 k = vec3(-0.866025404, 0.5, 0.577350269); p = abs(p);
+	p -= 2.0 * min(dot(k.xy, p), 0.0) * k.xy; p -= vec2(clamp(p.x, -k.z * r, k.z * r), r);
+	return length(p) * sign(p.y);
+}
+
+vec4 fx_shapes_chrono(vec2 uv) {
+	vec2 p = uv - 0.5 - u_position;
+	p = schro_rotate(p, u_rotation);
+	
+	float distance_score = 0.0;
+	int choice = int(floor(u_shape_type + 0.5));
+	
+	if (choice == 0) { distance_score = sdf_circle_sch(p, u_scale); }
+	else if (choice == 1) { distance_score = sdf_box_sch(p, vec2(u_scale)); }
+	else if (choice == 2) { distance_score = sdf_triangle_sch(p, u_scale * 1.2); }
+	else if (choice == 3) { distance_score = sdf_star_sch(p, u_scale * 1.3, 0.45); }
+	else { distance_score = sdf_hexagon_sch(p, u_scale); }
+	
+	float shape_mask = smoothstep(u_edge_softness, 0.0, distance_score);
+	
+	// Create an inline inner glow mask tracking the shape's boundary rim
+	float rim_mask = smoothstep(-0.06, 0.0, distance_score) * shape_mask;
+	
+	// Time-based color morph interpolation shifts
+	float timeline = sin(u_time * u_color_morph_speed) * 0.5 + 0.5;
+	vec4 morphing_core = mix(u_color_shape, u_color_rim, timeline);
+	vec4 morphing_bg = mix(u_color_bg, u_color_shape * 0.2, timeline * 0.4);
+	
+	// Composite background, core face, and illuminated rim together
+	vec4 final_color = mix(morphing_bg, morphing_core, shape_mask);
+	final_color = mix(final_color, u_color_rim, rim_mask * 0.7);
+	
+	return final_color;
+}
+"""
+
+
+const SRC_BASIC_LINES: String = """
+// Identical transform uniforms to keep the user experience consistent
+uniform float u_shape_type = 0.0; // @label Shape Selector | @min 0 | @max 4 | @sens 1
+uniform vec2 u_position = vec2(0.0, 0.0); // @label Position Offset | @min -1 | @max 1 | @sens 0.01
+uniform float u_scale = 0.35; // @label Shape Scale | @min 0.05 | @max 1.0 | @sens 0.01
+uniform float u_rotation = 0.0; // @label Rotation | @min -3.1416 | @max 3.1416 | @sens 0.05
+uniform float u_edge_softness = 0.01; // @label Edge Blur | @min 0.001 | @max 0.2 | @sens 0.001
+
+// NEW: Control the thickness of the hollow outline vector path
+uniform float u_line_thickness = 0.02; // @label Line Thickness | @min 0.005 | @max 0.2 | @sens 0.002
+
+uniform vec4 u_color_shape : source_color = vec4(0.0, 1.0, 0.8, 1.0); // @label Line Color | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_bg : source_color = vec4(0.01, 0.01, 0.03, 1.0); // @label Background Color | @min 0 | @max 1 | @sens 0.02
+
+// Helper: 2D Rotation Matrix
+vec2 lines_rotate(vec2 p, float angle) {
+	float s = sin(angle); float c = cos(angle);
+	return vec2(p.x * c - p.y * s, p.x * s + p.y * c);
+}
+
+// 1. Circle SDF
+float sdf_circle_l(vec2 p, float r) { return length(p) - r; }
+
+// 2. Box SDF
+float sdf_box_l(vec2 p, vec2 b) {
+	vec2 d = abs(p) - b;
+	return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
+}
+
+// 3. Equilateral Triangle SDF
+float sdf_triangle_l(vec2 p, float r) {
+	float k = sqrt(3.0);
+	p.x = abs(p.x) - r;
+	p.y = p.y + r / k;
+	if (p.x + k * p.y > 0.0) p = vec2(p.x - k * p.y, -k * p.x - p.y) / 2.0;
+	p.x -= clamp(p.x, -2.0 * r, 0.0);
+	return -length(p) * sign(p.y);
+}
+
+// 4. Five-Pointed Star SDF
+float sdf_star_l(vec2 p, float r, float rf) {
+	vec2 k1 = vec2(0.80901699437, -0.58778525229);
+	vec2 k2 = vec2(-0.30901699437, 0.95105651629);
+	p.x = abs(p.x);
+	p -= 2.0 * max(dot(k1, p), 0.0) * k1;
+	p -= 2.0 * max(dot(k2, p), 0.0) * k2;
+	p.x = abs(p.x);
+	vec2 ba = rf * vec2(-k1.y, k1.x) - vec2(0.0, r);
+	vec2 pa = p - vec2(0.0, r);
+	float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+	return length(pa - ba * h) * sign(pa.x * ba.y - pa.y * ba.x);
+}
+
+// 5. Hexagon SDF
+float sdf_hexagon_l(vec2 p, float r) {
+	vec3 k = vec3(-0.866025404, 0.5, 0.577350269);
+	p = abs(p);
+	p -= 2.0 * min(dot(k.xy, p), 0.0) * k.xy;
+	p -= vec2(clamp(p.x, -k.z * r, k.z * r), r);
+	return length(p) * sign(p.y);
+}
+
+vec4 fx_shapes_lines(vec2 uv) {
+	vec2 p = uv - 0.5 - u_position;
+	p = lines_rotate(p, u_rotation);
+	
+	float distance_score = 0.0;
+	int choice = int(floor(u_shape_type + 0.5));
+	
+	if (choice == 0) {
+		distance_score = sdf_circle_l(p, u_scale);
+	} else if (choice == 1) {
+		distance_score = sdf_box_l(p, vec2(u_scale));
+	} else if (choice == 2) {
+		distance_score = sdf_triangle_l(p, u_scale * 1.2);
+	} else if (choice == 3) {
+		distance_score = sdf_star_l(p, u_scale * 1.3, 0.45);
+	} else {
+		distance_score = sdf_hexagon_l(p, u_scale);
+	}
+	
+	// MAGIC LINE CODES: abs() isolates the shell perimeter.
+	// We subtract thickness so 0.0 is the exact center of the wire stroke.
+	float line_surface = abs(distance_score) - u_line_thickness;
+	
+	// Draw a smooth line stroke matching our thickness limits
+	float line_mask = smoothstep(u_edge_softness, 0.0, line_surface);
+	
+	return mix(u_color_bg, u_color_shape, line_mask);
+}
+"""
+
+
+const SRC_BASIC_SHAPES: String = """
+// Tweakable Uniforms that your framework will parse automatically
+uniform float u_shape_type = 0.0; // @label Shape Selector | @min 0 | @max 4 | @sens 1
+uniform vec2 u_position = vec2(0.0, 0.0); // @label Position Offset | @min -1 | @max 1 | @sens 0.01
+uniform float u_scale = 0.35; // @label Shape Scale | @min 0.05 | @max 1.0 | @sens 0.01
+uniform float u_rotation = 0.0; // @label Rotation | @min -3.1416 | @max 3.1416 | @sens 0.05
+uniform float u_edge_softness = 0.01; // @label Edge Blur | @min 0.001 | @max 0.2 | @sens 0.001
+
+uniform vec4 u_color_shape : source_color = vec4(1.0, 1.0, 1.0, 1.0); // @label Shape Color | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_bg : source_color = vec4(0.02, 0.02, 0.05, 1.0); // @label Background Color | @min 0 | @max 1 | @sens 0.02
+
+// Helper: 2D Rotation Matrix
+vec2 shapes_rotate(vec2 p, float angle) {
+	float s = sin(angle); float c = cos(angle);
+	return vec2(p.x * c - p.y * s, p.x * s + p.y * c);
+}
+
+// 1. Circle SDF
+float sdf_circle(vec2 p, float r) { return length(p) - r; }
+
+// 2. Box SDF
+float sdf_box(vec2 p, vec2 b) {
+	vec2 d = abs(p) - b;
+	return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
+}
+
+// 3. Equilateral Triangle SDF
+float sdf_triangle(vec2 p, float r) {
+	float k = sqrt(3.0);
+	p.x = abs(p.x) - r;
+	p.y = p.y + r / k;
+	if (p.x + k * p.y > 0.0) p = vec2(p.x - k * p.y, -k * p.x - p.y) / 2.0;
+	p.x -= clamp(p.x, -2.0 * r, 0.0);
+	return -length(p) * sign(p.y);
+}
+
+// 4. Five-Pointed Star SDF
+float sdf_star(vec2 p, float r, float rf) {
+	vec2 k1 = vec2(0.80901699437, -0.58778525229);
+	vec2 k2 = vec2(-0.30901699437, 0.95105651629);
+	p.x = abs(p.x);
+	p -= 2.0 * max(dot(k1, p), 0.0) * k1;
+	p -= 2.0 * max(dot(k2, p), 0.0) * k2;
+	p.x = abs(p.x);
+	vec2 ba = rf * vec2(-k1.y, k1.x) - vec2(0.0, r);
+	vec2 pa = p - vec2(0.0, r);
+	float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+	return length(pa - ba * h) * sign(pa.x * ba.y - pa.y * ba.x);
+}
+
+// 5. Hexagon SDF
+float sdf_hexagon(vec2 p, float r) {
+	vec3 k = vec3(-0.866025404, 0.5, 0.577350269);
+	p = abs(p);
+	p -= 2.0 * min(dot(k.xy, p), 0.0) * k.xy;
+	p -= vec2(clamp(p.x, -k.z * r, k.z * r), r);
+	return length(p) * sign(p.y);
+}
+
+vec4 fx_shapes_static(vec2 uv) {
+	// Center coordinates (-0.5 to 0.5) and apply user position slider offsets
+	vec2 p = uv - 0.5 - u_position;
+	
+	// Apply user rotation uniform
+	p = shapes_rotate(p, u_rotation);
+	
+	float distance_score = 0.0;
+	int choice = int(floor(u_shape_type + 0.5));
+	
+	// Evaluate the correct math function based on the user's float selection
+	if (choice == 0) {
+		distance_score = sdf_circle(p, u_scale);
+	} else if (choice == 1) {
+		distance_score = sdf_box(p, vec2(u_scale));
+	} else if (choice == 2) {
+		distance_score = sdf_triangle(p, u_scale * 1.2);
+	} else if (choice == 3) {
+		distance_score = sdf_star(p, u_scale * 1.3, 0.45);
+	} else {
+		distance_score = sdf_hexagon(p, u_scale);
+	}
+	
+	// Use smoothstep to give clean antialiasing or adjustable edge blurring
+	float shape_mask = smoothstep(u_edge_softness, 0.0, distance_score);
+	
+	// Mix background and shape color smoothly
+	return mix(u_color_bg, u_color_shape, shape_mask);
+}
+"""
 
 
 const SRC_PLASMA_STATIC: String = """

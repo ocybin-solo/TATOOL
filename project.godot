@@ -37,4 +37,4 @@ exit_menu={
 
 rendering_device/driver.windows="d3d12"
 renderer/rendering_method="mobile"
-viewport/transparent_background=true
+viewport/transparent_background=false

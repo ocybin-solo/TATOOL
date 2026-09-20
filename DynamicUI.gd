@@ -24,6 +24,7 @@ var last_tier5_row: int = 0    # 0 = VALUE Row, 1 = SENSITIVITY Row
 
 # System Power Menu cursor memory tracker
 var system_menu_index: int = 0 # 0 = BACK, 1 = APP OPTIONS, 2 = EXIT GAME
+var options_menu # OptionsMenu.gd instance (System Menu > APP CONFIG OPTIONS), created right after boot
 
 # FUNCTION END: state_declarations
 
@@ -69,8 +70,15 @@ var btn_channel: Button
 
 func _ready() -> void:
 	setup_ui_layout()
-	
-	
+	# Deferred so MainManager has finished building the trench buttons and menu helpers first
+	call_deferred("_boot_options_menu")
+
+func _boot_options_menu() -> void:
+	var main_manager = get_tree().get_first_node_in_group("main_manager")
+	if not main_manager: return
+	options_menu = load("res://OptionsMenu.gd").new()
+	options_menu.setup(main_manager)
+
 func setup_ui_layout() -> void:
 	# THE COMPACT HARDWARE CONTROL CONTAINER
 	var chassis_stack = VBoxContainer.new()
@@ -177,6 +185,9 @@ func _nav_vertical(step: int) -> void:
 
 	match active_state:
 		ControlState.SYSTEM_MENU:
+			if options_menu and options_menu.is_active():
+				options_menu.handle_vertical(step)
+				return
 			system_menu_index = posmod(system_menu_index + step, 3)
 			main_manager.redraw_system_power_menu()
 		ControlState.TIER_1_PASS:
@@ -206,6 +217,9 @@ func _on_dpad_right() -> void:
 	_nav_horizontal(1)
 
 func _nav_horizontal(step: int) -> void:
+	if active_state == ControlState.SYSTEM_MENU and options_menu and options_menu.is_active():
+		options_menu.handle_horizontal(step)
+		return
 	var main_manager = get_tree().get_first_node_in_group("main_manager")
 	if not main_manager or active_state != ControlState.TIER_5_TWEAK: return
 
@@ -244,6 +258,10 @@ func _on_action_button_b() -> void:
 
 	match active_state:
 		ControlState.SYSTEM_MENU:
+			if options_menu and options_menu.is_active():
+				if options_menu.handle_b():
+					main_manager.redraw_system_power_menu()
+				return
 			print("⚙️ System: Closing Main Power Menu overlay")
 			active_state = ControlState.HIDDEN
 			if main_manager.menu_overlay_panel and is_instance_valid(main_manager.menu_overlay_panel):
@@ -306,9 +324,14 @@ func _on_action_button_a() -> void:
 			return
 
 		ControlState.SYSTEM_MENU:
+			if options_menu and options_menu.is_active():
+				options_menu.handle_a()
+				return
 			match system_menu_index:
 				0: _on_action_button_b()
-				1: print("⚙️ System Action: Open options panels context configuration")
+				1:
+					if options_menu:
+						options_menu.open()
 				2: get_tree().quit()
 
 		ControlState.TIER_1_PASS:
@@ -431,7 +454,7 @@ func update_status_readout() -> void:
 	if main_manager:
 		match main_manager.get("active_shader_layer"):
 			0: layer_header = "[PASS 1: PATTERN]"
-			1: layer_header = "[PASS 2: EFFECTS]"
+			1: layer_header = "[PASS 2: WARP]"
 			2: layer_header = "[PASS 3: FILTERS]"
 	
 	# --- UPGRADED REAL-TIME HUD STATUS STRING CONCATENATION ---
