@@ -60,7 +60,7 @@ var current_preset: PatternPreset
 var current_time: float = 0.0
 
 # SELECT & START State Trackers
-var active_shader_layer: int = 0 
+var active_shader_layer: int = 0
 var is_menu_open: bool = false
 
 # --- SHADER LIBRARY PIPELINE STATE ---
@@ -151,7 +151,7 @@ func setup_three_pass_pipeline() -> void:
 	pass2_viewport.transparent_bg = false
 	pass2_viewport.render_target_clear_mode = SubViewport.CLEAR_MODE_ALWAYS
 	pass2_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	add_child(pass2_viewport) 
+	add_child(pass2_viewport)
 	
 	pass2_rect = ColorRect.new()
 	pass2_rect.size = max_canvas_resolution
@@ -426,7 +426,7 @@ func redraw_system_power_menu() -> void:
 	label_title.add_theme_color_override("font_color", Color.RED)
 	menu_list_box.add_child(label_title)
 
-	var options = ["BACK TO 🔧", "⚙ APP CONFIG OPTIONS", "⏻ EXIT APPLICATION"]
+	var options = ["Ⓑ BACK Ⓑ ", "⚙ APP CONFIG OPTIONS", "🗂 PRESETS", "⏻ EXIT APPLICATION"]
 	for i in range(options.size()):
 		var lbl = Label.new()
 		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -880,11 +880,11 @@ func save_current_pattern_preset() -> void:
 		active_params.append(p.name)
 		
 		# --- CLEAN FORMATTING HOOKS ---
-		if p.type == TYPE_FLOAT: 
+		if p.type == TYPE_FLOAT:
 			output += "mat.set_shader_parameter('%s', %.3f);\n" % [p.name, val]
-		elif p.type == TYPE_VECTOR2: 
+		elif p.type == TYPE_VECTOR2:
 			output += "mat.set_shader_parameter('%s', vec2(%.3f, %.3f));\n" % [p.name, val.x, val.y]
-		elif p.type == TYPE_COLOR: 
+		elif p.type == TYPE_COLOR:
 			output += "mat.set_shader_parameter('%s', Color(%.2f, %.2f, %.2f, %.2f));\n" % [p.name, val.r, val.g, val.b, val.a]
 			
 	# --- UNTANGLED SYSTEM CLIPBOARD REGISTRATION ---

@@ -441,36 +441,10 @@ func _register_builtin_recipes() -> void:
 	_register("halftone_dots", PASS_FILTER, "🎨 HALFTONE DOT MATRIX", SRC_HALFTONE_DOTS, false)
 	_register("ascii_art", PASS_FILTER, "📟 ASCII CHARACTER TERMINAL", SRC_ASCII_ART, false)
 	_register("oil_painting", PASS_FILTER, "🖌️ OIL PAINTING CANVAS", SRC_OIL_PAINTING, false)
-	_register("p3_fisheye_bulb", PASS_FILTER, "FISHEYE BULB LENS", SRC_FISHEYE_BULB, true)
 
 
 
-const SRC_P3_FISHEYE_BULB: String = """
-uniform vec2 u_lens_center = vec2(0.5, 0.5); // @label Bulb Center | @min 0.0 | @max 1.0 | @sens 0.01
-uniform float u_lens_radius = 0.5; // @label Bulb Radius | @min 0.1 | @max 1.5 | @sens 0.02
-uniform float u_lens_power = 1.5; // @label Pinch Intensity | @min 0.1 | @max 4.0 | @sens 0.05
 
-vec2 fx_fisheye_bulb(vec2 uv) {
-	// Calculate the distance vector from the pixel to the center of our bulb lens
-	vec2 p = uv - u_lens_center;
-	float d = length(p);
-	
-	// Check if the current pixel coordinate falls within our lens bubble radius
-	if (d < u_lens_radius) {
-		// Normalize the coordinate space relative to the radius of the bulb
-		float norm_d = d / u_lens_radius;
-		
-		// Run a non-linear exponential warp factor on the normalized radius
-		float warp = pow(norm_d, u_lens_power);
-		
-		// Rescale the vector from the center based on the magnification power curve
-		return u_lens_center + normalize(p) * warp * u_lens_radius;
-	}
-	
-	// If outside the lens boundary, leave the coordinate tracking flat and untouched
-	return uv;
-}
-"""
 
 
 const SRC_OIL_PAINTING: String = """

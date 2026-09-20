@@ -1,6 +1,7 @@
 extends RefCounted
 ## OptionsMenu.gd -- TATOOL app options (System Main Menu > APP CONFIG OPTIONS)
 ## Colors (background + button colors) and Controller Layout (landscape / portrait, each with mirrors).
+## It also owns PresetsMenu.gd, so DynamicUI only ever talks to this one object.
 ## Everything is saved to user:// and re-applied at launch.
 ##
 ## The menu is driven by TREE. Row kinds:
@@ -85,6 +86,8 @@ var channel_idx: int = 0
 var tweak_row: int = 0
 var sens_idx: int = DEFAULT_SENS_INDEX
 
+var presets # PresetsMenu.gd (System Main Menu > PRESETS)
+
 # Controller layout. Nodes are found from the existing buttons; their original ("standard") arrangement is
 # remembered so every layout is rebuilt from it and never drifts.
 var _layout_ready: bool = false
@@ -108,6 +111,8 @@ var _std_dpad_flag: int = 0
 # =========================================================================
 func setup(main_manager) -> void:
 	main = main_manager
+	presets = load("res://PresetsMenu.gd").new()
+	presets.setup(main, self)
 	# Capture what the app looks like BEFORE any customization so RESET can restore it
 	defaults["bg_color"] = ProjectSettings.get_setting("rendering/environment/defaults/default_clear_color", Color(0.3, 0.3, 0.3, 1.0))
 	defaults["button_color"] = _read_default_button_color()
@@ -325,6 +330,12 @@ func _request_orientation(portrait: bool) -> void:
 	# The new size arrives a moment later; _on_window_resized() then re-fits everything
 
 func _on_window_resized() -> void:
+	if presets != null and presets.typing:
+		return # the on-screen keyboard can resize the window; re-check once typing ends
+	_relayout()
+
+## Called by PresetsMenu when the name field loses focus.
+func notify_typing_done() -> void:
 	_relayout()
 
 ## Arrange everything for the window's CURRENT shape (tall = portrait) using that shape's saved layout.
@@ -387,13 +398,22 @@ func open() -> void:
 
 ## True only while our own panel is still the one on screen (PWR/OPT closing it makes this false).
 func is_active() -> bool:
+	if presets != null and presets.is_active():
+		return true
 	return is_open and is_instance_valid(_panel_ref) and main.menu_overlay_panel == _panel_ref
+
+## System Main Menu > PRESETS
+func open_presets() -> void:
+	presets.open()
 
 
 # =========================================================================
 # INPUT (called by DynamicUI)
 # =========================================================================
 func handle_vertical(step: int) -> void:
+	if presets != null and presets.is_active():
+		presets.handle_vertical(step)
+		return
 	match mode:
 		Mode.LIST:
 			var node_id: String = node_stack.back()
@@ -406,6 +426,9 @@ func handle_vertical(step: int) -> void:
 	redraw()
 
 func handle_horizontal(step: int) -> void:
+	if presets != null and presets.is_active():
+		presets.handle_horizontal(step)
+		return
 	if mode != Mode.TWEAK:
 		return
 	if tweak_row == 0:
@@ -416,6 +439,9 @@ func handle_horizontal(step: int) -> void:
 	redraw()
 
 func handle_a() -> void:
+	if presets != null and presets.is_active():
+		presets.handle_a()
+		return
 	match mode:
 		Mode.LIST:
 			var node_id: String = node_stack.back()
@@ -451,6 +477,8 @@ func handle_a() -> void:
 ## Steps back one level. Returns true when the options menu itself is closed
 ## (the caller then redraws the System Main Menu).
 func handle_b() -> bool:
+	if presets != null and presets.is_active():
+		return presets.handle_b()
 	match mode:
 		Mode.TWEAK:
 			mode = Mode.CHANNEL

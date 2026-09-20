@@ -23,7 +23,7 @@ var last_tier4_index: int = 0  # Remembers focused Parameter/Channel Sub-Axis Ro
 var last_tier5_row: int = 0    # 0 = VALUE Row, 1 = SENSITIVITY Row
 
 # System Power Menu cursor memory tracker
-var system_menu_index: int = 0 # 0 = BACK, 1 = APP OPTIONS, 2 = EXIT GAME
+var system_menu_index: int = 0 # 0 = BACK, 1 = APP OPTIONS, 2 = PRESETS, 3 = EXIT GAME
 var options_menu # OptionsMenu.gd instance (System Menu > APP CONFIG OPTIONS), created right after boot
 
 # FUNCTION END: state_declarations
@@ -94,23 +94,23 @@ func setup_ui_layout() -> void:
 
 	# A Button (✔ ACCEPT)
 	btn_channel = Button.new()
-	btn_channel.text = "Ⓐ"
+	btn_channel.text = "▢"
 	btn_channel.custom_minimum_size = Vector2(96, 96)
-	btn_channel.add_theme_font_size_override("font_size", 56)
+	btn_channel.add_theme_font_size_override("font_size", 36)
 	btn_channel.add_theme_color_override("font_color", Color.GREEN)
 	btn_channel.pressed.connect(_on_action_button_a) # Wired to Accept logic
 	action_row.add_child(btn_channel)
 
 	# Perfect visual axis alignment gap matching the structural width of the D-pad cross center
 	var button_gap = Control.new()
-	button_gap.custom_minimum_size = Vector2(93, 0)
+	button_gap.custom_minimum_size = Vector2(96, 0)
 	action_row.add_child(button_gap)
 
 	# B Button (❌ BACK)
 	btn_sens_left = Button.new()
-	btn_sens_left.text = "Ⓑ"
+	btn_sens_left.text = "▢"
 	btn_sens_left.custom_minimum_size = Vector2(96, 96)
-	btn_sens_left.add_theme_font_size_override("font_size", 56)
+	btn_sens_left.add_theme_font_size_override("font_size", 36)
 	btn_sens_left.add_theme_color_override("font_color", Color.RED)
 	btn_sens_left.pressed.connect(_on_action_button_b) # Wired to Exit/Back logic
 	action_row.add_child(btn_sens_left)
@@ -122,7 +122,7 @@ func setup_ui_layout() -> void:
 
 	# PUSH DPAD DOWN: Increased vertical separation gap between rows
 	var vertical_spacer = Control.new()
-	vertical_spacer.custom_minimum_size = Vector2(-10, 0)
+	vertical_spacer.custom_minimum_size = Vector2(0, 0)
 	chassis_stack.add_child(vertical_spacer)
 
 	# LOW ROW: Singular 3x3 D-Pad Cross Grid
@@ -188,7 +188,7 @@ func _nav_vertical(step: int) -> void:
 			if options_menu and options_menu.is_active():
 				options_menu.handle_vertical(step)
 				return
-			system_menu_index = posmod(system_menu_index + step, 3)
+			system_menu_index = posmod(system_menu_index + step, 4)
 			main_manager.redraw_system_power_menu()
 		ControlState.TIER_1_PASS:
 			if main_manager.active_menu_kind == main_manager.MenuKind.SELECT_PASS:
@@ -332,7 +332,10 @@ func _on_action_button_a() -> void:
 				1:
 					if options_menu:
 						options_menu.open()
-				2: get_tree().quit()
+				2:
+					if options_menu:
+						options_menu.open_presets()
+				3: get_tree().quit()
 
 		ControlState.TIER_1_PASS:
 			print("🎮 Hierarchy Push: TIER_1_PASS -> TIER_2_FORMULA")
