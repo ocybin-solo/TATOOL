@@ -221,10 +221,10 @@ func setup_interface_layer() -> void:
 
 	# 🌟 PWR Button on TOP
 	btn_shader_menu = Button.new()
-	btn_shader_menu.text = "⏻\n"
+	btn_shader_menu.text = "⚙\n"
 	btn_shader_menu.custom_minimum_size = Vector2(96, 96)
 	btn_shader_menu.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	btn_shader_menu.add_theme_color_override("font_color", Color.RED)
+	btn_shader_menu.add_theme_color_override("font_color", Color.GOLD)
 	btn_shader_menu.add_theme_font_size_override("font_size", 44)
 	# 🌟 WIRE RE-CONNECTED: Link PWR button to its handler method
 	btn_shader_menu.pressed.connect(_on_shader_menu_button_pressed)
@@ -237,10 +237,10 @@ func setup_interface_layer() -> void:
 
 	# 🌟 OPT Button on BOTTOM
 	btn_select_pass = Button.new()
-	btn_select_pass.text = "■\n"
+	btn_select_pass.text = "💬\n"
 	btn_select_pass.custom_minimum_size = Vector2(96, 96)
 	btn_select_pass.size_flags_vertical = Control.SIZE_SHRINK_END
-	btn_select_pass.add_theme_color_override("font_color", Color.CYAN)
+	btn_select_pass.add_theme_color_override("font_color", Color.CORNFLOWER_BLUE)
 	btn_select_pass.add_theme_font_size_override("font_size", 44)
 	# 🌟 WIRE RE-CONNECTED: Link OPT button to its handler method
 	btn_select_pass.pressed.connect(_on_select_pass_button_pressed)
@@ -425,7 +425,7 @@ func redraw_system_power_menu() -> void:
 	label_title.add_theme_color_override("font_color", Color.RED)
 	menu_list_box.add_child(label_title)
 
-	var options = ["◀ BACK TO GRAPHICS", "⚙ APP CONFIG OPTIONS", "⏻ EXIT APPLICATION"]
+	var options = ["BACK TO GAME", "⚙ APP CONFIG OPTIONS", "⏻ EXIT APPLICATION"]
 	for i in range(options.size()):
 		var lbl = Label.new()
 		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

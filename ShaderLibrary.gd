@@ -361,7 +361,12 @@ uniform vec2 u_warp_frequency = vec2(2.5, 2.5); // @label Warp Frequency | @min 
 uniform float u_warp_strength = 1.1; // @label Warp Strength | @min 0 | @max 4 | @sens 0.05
 uniform float u_noise_detail = 4.0; // @label Noise Detail | @min 1 | @max 5 | @sens 1
 uniform float u_flow_speed = 0.4; // @label Flow Speed | @min 0 | @max 3 | @sens 0.05
-uniform vec4 u_pattern_color : source_color = vec4(0.1, 0.7, 0.9, 1.0); // @label Pattern Color | @min 0 | @max 1 | @sens 0.02
+
+// FOUR DISTINCT COLOR SLOTS EXPOSED TO THE USER
+uniform vec4 u_color_base : source_color = vec4(0.02, 0.02, 0.05, 1.0); // @label Base Color | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_warp_q : source_color = vec4(0.12, 0.0, 0.22, 1.0); // @label Distortion Color A | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_warp_r : source_color = vec4(0.0, 0.5, 0.5, 1.0); // @label Distortion Color B | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_pattern_color : source_color = vec4(0.1, 0.7, 0.9, 1.0); // @label Highlight Color | @min 0 | @max 1 | @sens 0.02
 
 float fbm_hash2d(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
 float fbm_value_noise(vec2 p) {
@@ -382,13 +387,27 @@ float fbm_octaves(vec2 p) {
 vec4 fx_fbm(vec2 uv) {
 	vec2 st = uv * u_warp_frequency;
 	float scaled_time = u_time * u_flow_speed;
+	
+	// Extracting the data layers
 	vec2 q = vec2(fbm_octaves(st + vec2(scaled_time * 0.2)), fbm_octaves(st + vec2(5.2, 1.3) + vec2(scaled_time * 0.15)));
 	vec2 r = vec2(fbm_octaves(st + u_warp_strength * q + vec2(1.7, 9.2) + vec2(scaled_time * 0.3)), fbm_octaves(st + u_warp_strength * q + vec2(8.3, 2.8) + vec2(scaled_time * 0.05)));
 	float final_field_math = fbm_octaves(st + u_warp_strength * r);
-	vec4 core_bg = mix(vec4(0.02, 0.02, 0.05, 1.0), vec4(0.12, 0.0, 0.22, 1.0), clamp(length(q), 0.0, 1.0));
-	return mix(core_bg, u_pattern_color, final_field_math) * (final_field_math * 1.5 + 0.3);
+	
+	// 1. Core mix: Blends Base Color into Warp Q color based on the magnitude of the first warp layer
+	vec4 dynamic_color = mix(u_color_base, u_color_warp_q, clamp(length(q), 0.0, 1.0));
+	
+	// 2. Secondary layer mix: Infuses Warp R color based on the directional variance (angle) of the secondary veins
+	float angle_factor = (atan(r.y, r.x) + 3.14159) / 6.28318; // normalize angle to 0.0 - 1.0
+	dynamic_color = mix(dynamic_color, u_color_warp_r, clamp(angle_factor * length(r), 0.0, 1.0));
+	
+	// 3. Final field layer: Layers the Pattern/Highlight color using the overall scalar intensity
+	vec4 final_mix = mix(dynamic_color, u_pattern_color, final_field_math);
+	
+	// Maintain your original brightness multiplier shading curve
+	return final_mix * (final_field_math * 1.5 + 0.3);
 }
 """
+
 
 const SRC_KALEIDOSCOPE: String = """
 uniform float u_segments = 6.0; // @label Slides | @min 1 | @max 32 | @sens 1
