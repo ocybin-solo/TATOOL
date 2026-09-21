@@ -11,12 +11,10 @@ config_version=5
 [application]
 
 config/name="ShaderPatterns"
-config/description="Closed beta version 1.8
-Completely redesigned entire codebase to allow multiple shader passes.  Completely reworked a UI that is now fully customizable. "
 config/version="1.8"
 run/main_scene="uid://bcnt88dwpdalh"
 config/features=PackedStringArray("4.7", "Mobile")
-config/icon="res://icon.svg"
+config/icon="uid://bbwsqx4qsaymw"
 
 [input]
 
