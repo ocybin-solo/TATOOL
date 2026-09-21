@@ -11,6 +11,9 @@ config_version=5
 [application]
 
 config/name="ShaderPatterns"
+config/description="Closed beta version 1.8
+Completely redesigned entire codebase to allow multiple shader passes.  Completely reworked a UI that is now fully customizable. "
+config/version="1.8"
 run/main_scene="uid://bcnt88dwpdalh"
 config/features=PackedStringArray("4.7", "Mobile")
 config/icon="res://icon.svg"
@@ -37,4 +40,4 @@ exit_menu={
 
 rendering_device/driver.windows="d3d12"
 renderer/rendering_method="mobile"
-viewport/transparent_background=false
+textures/vram_compression/import_etc2_astc=true
