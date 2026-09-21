@@ -411,15 +411,17 @@ func _register_builtin_recipes() -> void:
 	# 5. Basic Shapes 
 	# Geometry Engines
 	_register("shapes_static", PASS_PATTERN, "GEOMETRY: SOLID SHAPES", SRC_BASIC_SHAPES, false)
-	_register("shapes_cosine", PASS_PATTERN, "GEOMETRY: SOLID COSINE", SRC_SHAPES_COSINE, false) 
-	_register("shapes_chrono", PASS_PATTERN, "GEOMETRY: SOLID CHRONO", SRC_SHAPES_CHRONO, false) 
-	
-	# Hollow Wireframe Geometry
 	_register("shapes_lines", PASS_PATTERN, "GEOMETRY: HOLLOW WIREFRAMES", SRC_BASIC_LINES, false)
-	_register("lines_cosine", PASS_PATTERN, "GEOMETRY: WIREFRAME COSINE", SRC_LINES_COSINE, false) 
-	_register("lines_chrono", PASS_PATTERN, "GEOMETRY: WIREFRAME CHRONO", SRC_LINES_CHRONO, false)  
- 
 
+ 
+	# shadertoy theft 
+	#_register("shifting_rings", PASS_PATTERN, "ST/rikmazz: SHIFTING RINGS", SRC_SHIFTING_RINGS, false)
+	#_register("coastal_landscape", PASS_PATTERN, "ST/bitless: COASTAL LANDSCAPE", SRC_COASTAL_LANDSCAPE, false)
+	#_register("triangle_grid", PASS_PATTERN, "ST/SHANE: TRIANGLE GRID CONTOUR", SRC_TRIANGLE_GRID, false)
+	_register("hairy_infinity", PASS_PATTERN, "FRACTAL: ST/NR4s HAIRY INFINITY", SRC_HAIRY_INFINITY, false)
+	
+	
+	
 	#######  PASS 2 ########### (Warp Modules) - Stackable!
 	_register("kaleidoscope", PASS_WARP, "KALEIDOSCOPE REFLECTION", SRC_KALEIDOSCOPE, true)
 	_register("swirl", PASS_WARP, "RADIAL SWIRL", SRC_SWIRL, true)
@@ -442,6 +444,569 @@ func _register_builtin_recipes() -> void:
 	_register("ascii_art", PASS_FILTER, "📟 ASCII CHARACTER TERMINAL", SRC_ASCII_ART, false)
 	_register("oil_painting", PASS_FILTER, "🖌️ OIL PAINTING CANVAS", SRC_OIL_PAINTING, false)
 	_register("neon_blur", PASS_FILTER, "🔮 NEON GLOW BLUR", SRC_NEON_BLUR, false)
+
+
+const SRC_HAIRY_INFINITY: String = """
+uniform float u_zoom_scale = 1.49; // @label Fractal Scale | @min 0.2 | @max 4.0 | @sens 0.02
+uniform float u_morph_speed = 0.5; // @label Orbit Morph Speed | @min 0.0 | @max 3.0 | @sens 0.05
+uniform float u_color_scale = 1.15; // @label Color Spread | @min 0.2 | @max 3.0 | @sens 0.05
+uniform vec2 u_orbit_tweak = vec2(3.54, -2.377); // @label Chaos Target | @min -5 | @max 5 | @sens 0.01
+
+uniform vec4 u_color_base : source_color = vec4(0.51, 0.35, 0.43, 1.0); // @label Nebula Core | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_glow : source_color = vec4(-0.46, -0.33, -0.27, 1.0); // @label Filament Sheen | @min 0 | @max 1 | @sens 0.02
+
+// --- COMPLEX NUMBER MATHEMATICAL ENGINES ---
+vec2 hair_cis(float a) {
+	return vec2(cos(a), sin(a));
+}
+
+vec2 hair_cmul(vec2 a, vec2 b) {
+	return vec2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
+}
+
+vec2 hair_cdiv(vec2 a, vec2 b) {
+	return vec2(dot(a, b), a.y * b.x - a.x * b.y) / max(dot(b, b), 1.e-4);
+}
+
+vec2 hair_cexp(vec2 x) {
+	return min(exp(x.x), 2.e4) * hair_cis(x.y);
+}
+
+vec2 hair_clog(vec2 a) {
+	return vec2(log(length(a)), atan(a.y, a.x));
+}
+
+vec3 hair_cmap(float t) {
+	return u_color_base.rgb
+		+ u_color_glow.rgb * cos(6.28 * t + vec3(5.99, 6.65, 6.74))
+		+ vec3(-0.07, -0.07, -0.09) * cos(12.57 * t + vec3(7.52, 4.22, 4.59));
+}
+
+float hair_piecewise_log(float x) {
+	float split = clamp(0.19, 0.001, 0.999);
+	vec2 curvature = vec2(-0.26, 11.61);
+	return fract(0.35 - (
+		(x < split)
+			? (split * log(1.0 + curvature.x * x / split) / log(1.0 + curvature.x))
+			: (split + (1.0 - split) * log(1.0 + curvature.y * (x - split) / (1.0 - split)) / log(1.0 + curvature.y))
+	));
+}
+
+vec2 hair_ratexp(vec2 z, vec2 origin, vec4 num, vec4 den, float exp_amt, vec4 exp_arg) {
+	vec2 z1 = z - origin; vec2 z2 = hair_cmul(z1, z1);
+	vec2 z3 = hair_cmul(z2, z1); vec2 z4 = hair_cmul(z2, z2);
+	return hair_cdiv(num.x * z1 + num.y * z2 + num.z * z3 + num.w * z4, den.x * z1 + den.y * z2 + den.z * z3 + den.w * z4) 
+		+ exp_amt * hair_cexp(exp_arg.x * z1 + exp_arg.y * z2 + exp_arg.z * z3 + exp_arg.w * z4);
+}
+
+float hair_trap(vec2 z) {
+	vec4 trap_num = vec4(8.71, 2.15, -1.34, 2.07); vec4 trap_den = vec4(-6.44, -9.64, 3.66, -2.39);
+	return length(hair_ratexp(z, vec2(5.87, -0.66), trap_num, trap_den, 0.000003, vec4(-275.43, -56.13, -133.67, -102.56)));
+}
+
+// --- FRACTAL CORE ORBIT HOPPING ---
+vec4 hair_evaluate_fractal(vec2 p) {
+	vec2 z = exp(mix(log(1.e-4), log(1.0), u_zoom_scale)) * p - vec2(-180.92, 18.35);
+	float tm = 1e9;
+	
+	// Dynamic animated origin warp shift injection loop
+	vec2 dynamic_origin = u_orbit_tweak + 0.01 * vec2(cos(u_time * u_morph_speed), sin(u_time * u_morph_speed));
+	vec4 f_num = vec4(-134.04, 107.15, 0.58, 0.84); vec4 f_den = vec4(5.821, 7.09, 2.811, 0.00024);
+	
+	for(int i = 0; i < 40 && dot(z, z) < 1e10; ++i) {
+		z = hair_ratexp(z, dynamic_origin, f_num, f_den, 0.0, vec4(1.0));
+		tm = min(tm, u_color_scale * hair_trap(z));
+	}
+	return vec4(hair_cmap(hair_piecewise_log(fract(tm))), 1.0);
+}
+
+void hair_sncndn(float u, float k2, out float sn, out float cn_out, out float dn) {
+	float emc = 1.0 - k2; float a = 1.0; dn = 1.0;
+	float em[4]; float en[4];
+	float c; // ELEVATED DECLARATION: Made 'c' visible to the whole function scope!
+	
+	a = 1.0;
+	dn = 1.0;
+	for (int i = 0; i < 4; i++) {
+		em[i] = a; emc = sqrt(emc); en[i] = emc;
+		c = 0.5 * (a + emc);
+		emc = a * emc; a = c;
+	}
+	u = c * u; sn = sin(u); cn_out = cos(u);
+	if (sn != 0.0) {
+		a = cn_out / sn; c = a * c;
+		for(int i = 3; i >= 0; i--) {
+			float b = em[i]; a = c * a; c = dn * c;
+			dn = (en[i] + a) / (b + a); a = c / b;
+		}
+		a = 1.0 / sqrt(c * c + 1.0);
+		sn = (sn < 0.0) ? -a : a;
+		cn_out = c * sn;
+	}
+}
+
+vec2 hair_cn_eval(vec2 z, float k2) {
+	float snu, cnu, dnu, snv, cnv, dnv;
+	hair_sncndn(z.x, k2, snu, cnu, dnu);
+	hair_sncndn(z.y, 1.0 - k2, snv, cnv, dnv);
+	float a = 1.0 / (1.0 - dnu * dnu * snv * snv);
+	return a * vec2(cnu * cnv, -snu * dnu * snv * dnv);
+}
+
+vec4 fx_hairy_infinity(vec2 uv) {
+	vec2 p = uv - 0.5;
+	
+	// Complex logarithmic conformal mapping spiral transform
+	vec2 z = hair_clog(p) * 1.1802 * 0.5 * 1.0;
+	z.x -= mod(0.03 * u_time, 1.0) * 3.7; 
+	
+	// Apply 2D Matrix Jacobi layout coordinates
+	z = vec2(z.x * 1.0 - z.y * -1.0, z.x * 1.0 + z.y * 1.0);
+	z = hair_cn_eval(z, 0.5);
+	
+	// Output compiled texture pixel
+	return clamp(hair_evaluate_fractal(z), 0.0, 1.0);
+}
+"""
+
+
+
+
+#
+#const SRC_TRIANGLE_GRID: String = """
+#uniform float u_grid_density = 8.0; // @label Grid Density | @min 2.0 | @max 24.0 | @sens 0.1
+#uniform float u_scroll_speed = 0.06; // @label Map Scroll Speed | @min 0.0 | @max 0.5 | @sens 0.01
+#uniform float u_pencil_shading = 0.4; // @label Pencil Sketch Mix | @min 0.0 | @max 1.0 | @sens 0.05
+#uniform float u_grid_line_weight = 0.95; // @label Grid Overlay Alpha | @min 0.0 | @max 1.0 | @sens 0.05
+#
+#// FOUR CORE HARMONIOUS TOPOGRAPHY PALETTES
+#uniform vec4 u_color_water_deep : source_color = vec4(0.20, 0.36, 0.60, 1.0); // @label Deep Sea Color | @min 0 | @max 1 | @sens 0.02
+#uniform vec4 u_color_water_shore : source_color = vec4(0.30, 0.55, 0.90, 1.0); // @label Shore Water | @min 0 | @max 1 | @sens 0.02
+#uniform vec4 u_color_beach : source_color = vec4(1.10, 0.85, 0.60, 1.0); // @label Sand Beach | @min 0 | @max 1 | @sens 0.02
+#uniform vec4 u_color_grass : source_color = vec4(0.63, 0.80, 0.57, 1.0); // @label Grass Terrain | @min 0 | @max 1 | @sens 0.02
+#
+#// Helper matrix rotation method
+#vec2 trig_rot2(vec2 p, float angle) {
+	#float s = sin(angle); float c = cos(angle);
+	#return vec2(p.x * c - p.y * s, p.x * s + p.y * c);
+#}
+#
+#float trig_hash21(vec2 p) { 
+	#return fract(sin(dot(p, vec2(141.13, 289.97))) * 43758.5453); 
+#}
+#
+#vec2 trig_hash22(vec2 p) { 
+	#float n = sin(dot(p, vec2(41.0, 289.0)));
+	#vec2 p_fract = fract(vec2(262144.0, 32768.0) * n);
+	#return sin(p_fract * 6.2831853 + u_time); 
+#}
+#
+#float trig_noise2D(vec2 p) {
+	#vec2 i = floor(p); vec2 f = fract(p);
+	#vec4 v;
+	#v.x = dot(trig_hash22(i), f);
+	#v.y = dot(trig_hash22(i + vec2(1.0, 0.0)), f - vec2(1.0, 0.0));
+	#v.z = dot(trig_hash22(i + vec2(0.0, 1.0)), f - vec2(0.0, 1.0));
+	#v.w = dot(trig_hash22(i + 1.0), f - 1.0);
+	#f = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+	#return mix(mix(v.x, v.y, f.x), mix(v.z, v.w, f.x), f.y);
+#}
+#
+#float trig_isoFunction(vec2 p) { 
+	#return trig_noise2D(p / 4.0 + 0.07); 
+#}
+#
+#float trig_distLine(vec2 a, vec2 b) {
+	#b = a - b;
+	#float h = clamp(dot(a, b) / dot(b, b), 0.0, 1.0);
+	#return length(a - b * h);
+#}
+#
+#float trig_distEdge(vec2 a, vec2 b) {
+	#return dot((a + b) * 0.5, normalize((b - a).yx * vec2(-1.0, 1.0)));
+#}
+#
+#vec2 trig_inter(vec2 p1, vec2 p2, float v1, float v2, float isovalue) {
+	#return mix(p1, p2, (isovalue - v1) / (v2 - v1) * 0.75 + 0.125); 
+#}
+#
+#int trig_isoLine(vec3 n3, vec2 ip0, vec2 ip1, vec2 ip2, float isovalue, float i, inout vec2 p0, inout vec2 p1) {
+	#p0 = vec2(1e5); p1 = vec2(1e5);
+	#int iTh = 0;
+	#if (n3.x > isovalue) iTh += 4;
+	#if (n3.y > isovalue) iTh += 2;
+	#if (n3.z > isovalue) iTh += 1;
+	#
+	#if (iTh == 1 || iTh == 6) {         
+		#p0 = trig_inter(ip1, ip2, n3.y, n3.z, isovalue);
+		#p1 = trig_inter(ip2, ip0, n3.z, n3.x, isovalue);
+	#} else if (iTh == 2 || iTh == 5) {        
+		#p0 = trig_inter(ip0, ip1, n3.x, n3.y, isovalue);
+		#p1 = trig_inter(ip1, ip2, n3.y, n3.z, isovalue);
+	#} else if (iTh == 3 || iTh == 4) {        
+		#p0 = trig_inter(ip0, ip1, n3.x, n3.y, isovalue);
+		#p1 = trig_inter(ip2, ip0, n3.z, n3.x, isovalue);       
+	#}
+	#
+	#if (iTh >= 4 && iTh <= 6) { vec2 tmp = p0; p0 = p1; p1 = tmp; }
+	#if (i == 0.0) { vec2 tmp = p0; p0 = p1; p1 = tmp; }
+	#return iTh;
+#}
+#
+#vec4 fx_triangle_grid(vec2 uv) {
+	#// Center coordinates around viewport matrix and scroll over time
+	#vec2 p = (uv - 0.5);
+	#p = trig_rot2(p, 3.14159265 / 12.0) + vec2(0.8660254, 0.5) * u_time * u_scroll_speed;
+	#p *= u_grid_density;
+	#
+	#vec2 oP = p;
+	#p += vec2(trig_noise2D(p * 3.5), trig_noise2D(p * 3.5 + 7.3)) * 0.015;
+	#
+	#// SIMPLEX TRIANGLE MESH CONTEXT PARSING
+	#vec2 s_skew = floor(p + (p.x + p.y) * 0.36602540378);
+	#p -= s_skew - (s_skew.x + s_skew.y) * 0.211324865;
+	#
+	#float i_flip = p.x < p.y ? 1.0 : 0.0;
+	#vec2 ioffs = vec2(1.0 - i_flip, i_flip);
+	#
+	#vec2 ip0 = vec2(0.0), ip1 = ioffs - 0.2113248654, ip2 = vec2(0.577350269); 
+	#vec2 ctr = (ip0 + ip1 + ip2) / 3.0;
+	#ip0 -= ctr; ip1 -= ctr; ip2 -= ctr; p -= ctr;
+	#
+	#vec3 n3;
+	#n3.x = trig_isoFunction(s_skew);
+	#n3.y = trig_isoFunction(s_skew + ioffs);
+	#n3.z = trig_isoFunction(s_skew + 1.0);
+	#
+	#float d = 1e5, d2 = 1e5, d3 = 1e5, d4 = 1e5, d5 = 1e5; 
+	#float isovalue = 0.0;
+	#vec2 p0, p1; 
+	#
+	#int iTh = trig_isoLine(n3, ip0, ip1, ip2, isovalue, i_flip, p0, p1);
+	#d = min(d, trig_distEdge(p - p0, p - p1)); 
+	#if (iTh == 7) { d = 0.0; }
+	#
+	#d3 = min(d3, trig_distLine((p - p0), (p - p1))); 
+	#d4 = min(d4, min(length(p - p0), length(p - p1))); 
+	#
+	#float tri = min(min(trig_distLine(p - ip0, p - ip1), trig_distLine(p - ip1, p - ip2)), trig_distLine(p - ip2, p - ip0));
+	#d5 = min(d5, tri);
+	#d5 = min(d5, length(p) - 0.02);   
+	#
+	#isovalue = -0.15;
+	#int iTh2 = trig_isoLine(n3, ip0, ip1, ip2, isovalue, i_flip, p0, p1);
+	#d2 = min(d2, trig_distEdge(p - p0, p - p1)); 
+	#if (iTh2 == 7) d2 = 0.0; 
+	#if (iTh == 7) d2 = 1e5;
+	#d2 = max(d2, -d);
+	#
+	#d3 = min(d3, trig_distLine((p - p0), (p - p1)));
+	#d4 = min(d4, min(length(p - p0), length(p - p1))); 
+	#d4 -= 0.075; d3 -= 0.0125;
+	#
+	#d /= u_grid_density; d2 /= u_grid_density; d3 /= u_grid_density; d4 /= u_grid_density; d5 /= u_grid_density; 
+	#
+	#float sf = 0.004; 
+	#vec3 out_col = u_color_beach.rgb;
+	#
+	#if (d > 0.0 && d2 > 0.0) out_col = u_color_water_deep.rgb;
+	#if (d > 0.0) out_col = mix(out_col, u_color_water_shore.rgb, (1.0 - smoothstep(0.0, sf, d2 - 0.012)));
+	#out_col = mix(out_col, u_color_beach.rgb, (1.0 - smoothstep(0.0, sf, d2)));
+	#out_col = mix(out_col, u_color_beach.rgb * 0.7, (1.0 - smoothstep(0.0, sf, d - 0.012)));
+	#out_col = mix(out_col, u_color_grass.rgb, (1.0 - smoothstep(0.0, sf, d))); 
+	#
+	#if (d2 > 0.0) out_col *= (abs(dot(n3, vec3(1.0))) * 1.25 + 1.25) / 2.0;
+	#else out_col *= max(2.0 - (dot(n3, vec3(1.0)) + 1.45) / 1.25, 0.0);
+	#
+	#float pat = abs(fract(tri * 12.5 + 0.4) - 0.5) * 2.0;
+	#out_col *= pat * 0.425 + 0.75; 
+	#
+	#out_col = mix(out_col, vec3(0.0), (1.0 - smoothstep(0.0, sf, d5)) * u_grid_line_weight);
+	#out_col = mix(out_col, vec3(0.0), (1.0 - smoothstep(0.0, sf, d3)));
+	#out_col = mix(out_col, vec3(0.0), (1.0 - smoothstep(0.0, sf, d4)));
+	#out_col = mix(out_col, vec3(1.0), (1.0 - smoothstep(0.0, sf, d4 + 0.005)));
+	#
+	#// PENCIL ETCHING SKETCH OVERLAY MATRICES
+	#vec2 q_stretch = oP * 1.5;
+	#out_col = min(out_col, vec3(1.0));
+	#float gr = sqrt(dot(out_col, vec3(0.299, 0.587, 0.114))) * 1.25;
+	#
+	#float ns = (trig_noise2D(q_stretch * 4.0 * vec2(0.333, 3.0)) * 0.64 + trig_noise2D(q_stretch * 8.0 * vec2(0.333, 3.0)) * 0.34) * 0.5 + 0.5;
+	#ns = gr - ns;
+	#
+	#q_stretch = trig_rot2(q_stretch, 3.14159265 / 3.0);
+	#float ns2 = (trig_noise2D(q_stretch * 4.0 * vec2(0.333, 3.0)) * 0.64 + trig_noise2D(q_stretch * 8.0 * vec2(0.333, 3.0)) * 0.34) * 0.5 + 0.5;
+	#ns2 = gr - ns2;
+	#
+	#ns = smoothstep(0.0, 1.0, min(ns, ns2));
+	#out_col = mix(out_col, out_col * (ns + 0.35), u_pencil_shading);
+	#
+	#return vec4(out_col, 1.0);
+#}
+#"""
+#
+#
+#const SRC_COASTAL_LANDSCAPE: String = """
+#uniform float u_art_scale = 1.0; // @label Landscape Zoom | @min 0.5 | @max 3.0 | @sens 0.02
+#uniform float u_wind_speed = 1.0; // @label Wind Intensity | @min 0.0 | @max 4.0 | @sens 0.05
+#uniform float u_grass_density = 60.0; // @label Grass Density | @min 20 | @max 120 | @sens 2
+#uniform float u_tree_bend = 0.75; // @label Tree Sway | @min 0.1 | @max 2.0 | @sens 0.05
+#
+#uniform vec4 u_color_sky_a : source_color = vec4(0.26, 0.76, 0.77, 1.0); // @label Sky Zenith | @min 0 | @max 1 | @sens 0.02
+#uniform vec4 u_color_sky_b : source_color = vec4(1.0, 0.3, 1.0, 1.0); // @label Sky Horizon | @min 0 | @max 1 | @sens 0.02
+#uniform vec4 u_color_water : source_color = vec4(0.0, 0.1, 0.5, 1.0); // @label Deep Water | @min 0 | @max 1 | @sens 0.02
+#
+#// Helper macro replacement for IQ's procedural palette
+#vec3 coast_palette(float t, vec3 a, vec3 b, vec3 c, vec3 d) {
+	#return a + b * cos(6.283185 * (c * t + d));
+#}
+#
+#vec3 coast_sky_palette(float t) {
+	#return coast_palette(t, u_color_sky_a.rgb, u_color_sky_b.rgb, vec3(0.8, 0.4, 0.7), vec3(0.0, 0.12, 0.54));
+#}
+#
+#vec3 coast_hue(float v) {
+	#return 0.6 + 0.76 * cos(6.3 * v + vec3(0.0, 23.0, 21.0));
+#}
+#
+#float coast_hash12(vec2 p) {
+	#vec3 p3 = fract(vec3(p.xyx) * .1031);
+	#p3 += dot(p3, p3.yzx + 33.33);
+	#return fract((p3.x + p3.y) * p3.z);
+#}
+#
+#vec2 coast_hash22(vec2 p) {
+	#vec3 p3 = fract(vec3(p.xyx) * vec3(.1031, .1030, .0973));
+	#p3 += dot(p3, p3.yzx + 33.33);
+	#return fract((p3.xx + p3.yz) * p3.zy);
+#}
+#
+#vec2 coast_rotate(vec2 st, float angle) {
+	#return mat2(vec2(cos(angle), sin(angle)), vec2(-sin(angle), cos(angle))) * st;
+#}
+#
+#float coast_st(float a, float b, float s) {
+	#return smoothstep(a - s, a + s, b);
+#}
+#
+#float coast_noise(vec2 p) {
+	#vec2 i = floor(p); vec2 f = fract(p);
+	#vec2 u = f * f * (3.0 - 2.0 * f);
+	#return mix(mix(dot(coast_hash22(i + vec2(0,0)), f - vec2(0,0)), 
+				   #dot(coast_hash22(i + vec2(1,0)), f - vec2(1,0)), u.x),
+				#mix(dot(coast_hash22(i + vec2(0,1)), f - vec2(0,1)), 
+					#dot(coast_hash22(i + vec2(1,1)), f - vec2(1,1)), u.x), u.y);
+#}
+#
+#vec4 fx_coastal_landscape(vec2 uv) {
+	#// Normalizing canvas space to keep aspect ratios clean inside your texture plane bounds
+	#vec2 coords = (uv - 0.5) * 2.0 * u_art_scale;
+	#coords.y = -coords.y;
+	#
+	#vec2 sun_pos = vec2(0.55, -0.53);
+	#vec2 tree_pos = vec2(-0.55, -0.2);
+	#vec2 sh, u, id, lc, t_vec;
+	#
+	#vec3 f_color = vec3(0.0);
+	#float xd, yd, h, l;
+	#vec4 C_layer;
+	#
+	#float sm = 0.005 * u_art_scale; // Antialiasing metric factor
+	#float global_time = u_time * u_wind_speed;
+#
+	#sh = coast_rotate(sun_pos, coast_noise(coords + global_time * 0.25) * 0.3);
+	 #
+	#// 1. SKY AND CLOUDS LAYER
+	#if (coords.y > -0.4) {
+		#u = coords + sh;
+		#yd = 60.0;
+		#id = vec2((length(u) + 0.01) * yd, 0.0);
+		#xd = floor(id.x) * 0.09;
+		#h = (coast_hash12(floor(id.xx)) * 0.5 + 0.25) * (global_time + 10.0) * 0.25;
+		#t_vec = coast_rotate(u, h);
+	#
+		#id.y = atan(t_vec.y, t_vec.x) * xd;
+		#lc = fract(id);
+		#id -= lc;
+	#
+		#t_vec = vec2(cos((id.y + 0.5) / xd) * (id.x + 0.5) / yd, sin((id.y + 0.5) / xd) * (id.x + 0.5) / yd); 
+		#t_vec = coast_rotate(t_vec, -h) - sh;
+	#
+		#h = coast_noise(t_vec * vec2(0.5, 1.0) - vec2(global_time * 0.2, 0.0)) * step(-0.25, t_vec.y);
+		#h = smoothstep(0.052, 0.055, h);
+		#
+		#lc += (coast_noise(lc * vec2(1.0, 4.0) + id)) * vec2(0.7, 0.2);
+		#
+		#f_color = mix(coast_sky_palette(sin(length(u) - 0.1)) * 0.35,
+					 #mix(coast_sky_palette(sin(length(u) - 0.1) + (coast_hash12(id) - 0.5) * 0.15), vec3(1.0), h),
+					 #coast_st(abs(lc.x - 0.5), 0.4, sm * yd) * coast_st(abs(lc.y - 0.5), 0.48, sm * xd));
+	#}
+#
+	#// 2. WATER AND REFLECTIONS LAYER
+	#if (coords.y < -0.35) {
+		#float cld = coast_noise(-sh * vec2(0.5, 1.0) - vec2(global_time * 0.2, 0.0));
+		#cld = 1.0 - smoothstep(0.0, 0.15, cld) * 0.5;
+#
+		#u = coords * vec2(1.0, 15.0);
+		#id = floor(u);
+#
+		#for (float i = 1.0; i > -1.0; i -= 1.0) {
+			#if (id.y + i < -5.0) {
+				#lc = fract(u) - 0.5;
+				#lc.y = (lc.y + (sin(coords.x * 12.0 - global_time * 3.0 + id.y + i)) * 0.25 - i) * 4.0;
+				#h = coast_hash12(vec2(id.y + i, floor(lc.y)));
+				#
+				#xd = 6.0 + h * 4.0;
+				#yd = 30.0;
+				#lc.x = coords.x * xd + sh.x * 9.0;
+				#lc.x += sin(global_time * (0.5 + h * 2.0)) * 0.5;
+				#h = 0.8 * smoothstep(5.0, 0.0, abs(floor(lc.x))) * cld + 0.1;
+				#f_color = mix(f_color, mix(u_color_water.rgb, vec3(0.35, 0.35, 0.0), h), coast_st(lc.y, 0.0, sm * yd));
+				#lc += coast_noise(lc * vec2(3.0, 0.5)) * vec2(0.1, 0.6);
+				#
+				#f_color = mix(f_color, 
+							#mix(coast_hue(coast_hash12(floor(lc)) * 0.1 + 0.56) * (1.2 + floor(lc.y) * 0.17), vec3(1.0, 1.0, 0.0), h),
+							#coast_st(lc.y, 0.0, sm * xd) * coast_st(abs(fract(lc.x) - 0.5), 0.48, sm * xd) * coast_st(abs(fract(lc.y) - 0.5), 0.3, sm * yd));
+			#}
+		#}
+	#}
+	#
+	#vec4 O_color = vec4(f_color, 1.0);
+#
+	#// 3. BLOWING GRASS LAYER
+	#float grass_mask_accum = 0.0;
+	#u = coords + coast_noise(coords * 2.0) * 0.1 + vec2(0.0, sin(coords.x * 1.0 + 3.0) * 0.4 + 0.8);
+	#
+	#vec3 grass_base_color = mix(vec3(0.7, 0.6, 0.2), vec3(0.0, 1.0, 0.0), sin(global_time * 0.2) * 0.5 + 0.5);
+	#O_color = mix(O_color, vec4(grass_base_color * 0.4, 1.0), step(u.y, 0.0));
+#
+	#xd = u_grass_density;
+	#u = u * vec2(xd, xd / 3.5); 
+	#
+	#if (u.y < 1.2) {
+		#for (float y_it = 0.0; y_it > -3.0; y_it -= 1.0) {
+			#for (float x_it = -2.0; x_it < 3.0; x_it += 1.0) {
+				#id = floor(u) + vec2(x_it, y_it);
+				#lc = (fract(u) + vec2(1.0 - x_it, -y_it)) / vec2(5.0, 3.0);
+				#h = (coast_hash12(id) - 0.5) * 0.25 + 0.5;
+#
+				#lc -= vec2(0.3, 0.5 - h * 0.4);
+				#lc.x += sin(((global_time * 1.7 + h * 2.0 - id.x * 0.05 - id.y * 0.05) * 1.1 + id.y * 0.5) * 2.0) * (lc.y + 0.5) * 0.5;
+				#vec2 t_box = abs(lc) - vec2(0.02, 0.5 - h * 0.5);
+				#l = length(max(t_box, 0.0)) + min(max(t_box.x, t_box.y), 0.0);
+#
+				#l -= coast_noise(lc * 7.0 + id) * 0.1;
+				#C_layer = vec4(grass_base_color * 0.25, coast_st(l, 0.1, sm * xd * 0.09));               
+				#C_layer = mix(C_layer, vec4(grass_base_color * (1.2 + lc.y * 2.0) * (1.8 - h * 2.5), 1.0), coast_st(l, 0.04, sm * xd * 0.09));
+				#
+				#O_color = mix(O_color, C_layer, C_layer.a * step(id.y, -1.0));
+				#grass_mask_accum = max(grass_mask_accum, C_layer.a * step(id.y, -5.0));
+			#}
+		#}
+	#}
+#
+	#// 4. THE WIND-BENT TREE CROWN AND TRUNK
+	#float tree_cycle = sin(global_time * 0.5);
+ #
+	#if (abs(coords.x + tree_pos.x - 0.1 - tree_cycle * 0.1) < 0.6) {
+		#u = coords + tree_pos;
+		#u.x -= sin(u.y + 1.0) * 0.2 * (tree_cycle + u_tree_bend);
+		#u += coast_noise(u * 4.5 - 7.0) * 0.25;
+		#
+		#xd = 10.0; yd = 60.0; 
+		#t_vec = u * vec2(1.0, yd);
+		#h = coast_hash12(floor(t_vec.yy));
+		#t_vec.x += h * 0.01;
+		#t_vec.x *= xd;
+		#
+		#lc = fract(t_vec);
+		#
+		#float m = coast_st(abs(t_vec.x - 0.5), 0.5, sm * xd) * step(abs(t_vec.y + 20.0), 45.0);
+		#C_layer = mix(vec4(0.07, 0.07, 0.07, 1.0), vec4(0.5, 0.3, 0.0, 1.0) * (0.4 + h * 0.4), coast_st(abs(lc.y - 0.5), 0.4, sm * yd) * coast_st(abs(lc.x - 0.5), 0.45, sm * xd));
+		#C_layer.a = m;
+		#
+		#xd = 30.0; yd = 15.0;
+		#
+		#for (float xs = 0.0; xs < 4.0; xs += 1.0) {
+			#u = coords + tree_pos + vec2(xs / xd * 0.5 - (tree_cycle + u_tree_bend) * 0.15, -0.7);
+			#u += coast_noise(u * vec2(2.0, 1.0) + vec2(-global_time + xs * 0.05, 0.0)) * vec2(-0.25, 0.1) * smoothstep(0.5, -1.0, u.y + 0.7) * 0.75;
+	#
+			#t_vec = u * vec2(xd, 1.0);
+			#h = coast_hash12(floor(t_vec.xx) + xs * 1.4);
+			#
+			#yd = 5.0 + h * 7.0;
+			#t_vec.y *= yd;
+	#
+			#sh = t_vec;
+			#lc = fract(t_vec);
+			#h = coast_hash12(t_vec - lc);
+			#
+			#t_vec = (t_vec - lc) / vec2(xd, yd) + vec2(0.0, 0.7);
+			#
+			#m = (step(0.0, t_vec.y) * step(length(t_vec), 0.45) + step(t_vec.y, 0.0) * step(-0.7 + sin((floor(u.x) + xs * 0.5) * 15.0) * 0.2, t_vec.y)) * step(abs(t_vec.x), 0.5) * coast_st(abs(lc.x - 0.5), 0.35, sm * xd * 0.5); 
+	#
+			#lc += coast_noise(sh * vec2(1.0, 3.0)) * vec2(0.3, 0.3);
+			#vec3 leaf_color = coast_hue((h + (sin(global_time * 0.2) * 0.5 + 0.5)) * 0.2) - t_vec.x;
+	#
+			#C_layer = mix(C_layer, vec4(mix(leaf_color * 0.15, leaf_color * 0.6 * (0.7 + xs * 0.2), coast_st(abs(lc.y - 0.5), 0.47, sm * yd) * coast_st(abs(lc.x - 0.5), 0.2, sm * xd)), m), m);
+		#}
+#
+		#O_color = mix(O_color, C_layer, C_layer.a * (1.0 - grass_mask_accum));
+	#}
+	#
+	#return O_color;
+#}
+#"""
+#
+#
+#const SRC_SHIFTING_RINGS: String = """
+#uniform float u_grid_scale = 6.0; // @label Grid Tiling | @min 1.0 | @max 16.0 | @sens 0.5
+#uniform float u_ring_radius = 0.476; // @label Ring Radius | @min 0.1 | @max 1.0 | @sens 0.01
+#uniform float u_line_thickness = 0.006; // @label Line Stroke | @min 0.002 | @max 0.1 | @sens 0.002
+#uniform float u_stroke_blur = 0.058; // @label Line Blur | @min 0.001 | @max 0.2 | @sens 0.002
+#uniform float u_shift_speed = 0.448; // @label Shifting Speed | @min 0.0 | @max 3.0 | @sens 0.05
+#
+#uniform vec4 u_color_ring : source_color = vec4(0.684, 0.700, 0.168, 1.0); // @label Ring Color | @min 0 | @max 1 | @sens 0.02
+#uniform vec4 u_color_bg : source_color = vec4(0.062, 0.065, 0.051, 1.0); // @label Background Color | @min 0 | @max 1 | @sens 0.02
+#
+#// Helper function converted from the example
+#float rings_circle_outline(vec2 _st, float _radius, float _thk, float _blur) {
+	#vec2 dist = _st - vec2(0.5);
+	#float pct = smoothstep(_radius - _thk / 2.0 - (_blur),
+						   #_radius - _thk / 2.0,
+						   #dot(dist, dist) * 5.128) - 
+				#smoothstep(_radius + _thk / 2.0,
+						   #_radius + _thk / 2.0 + (_blur),
+						   #dot(dist, dist) * 5.128);
+	#return pct;
+#}
+#
+#vec4 fx_shifting_rings(vec2 uv) {
+	#// Standardized initialization matching your app layout instead of ShaderToy screen division
+	#vec2 st = uv * u_grid_scale;
+	#
+	#// Convert iTime variable over to your system's uniform u_time
+	#float time = u_shift_speed * u_time;
+	#float step_anim = smoothstep(0.0, 1.0, (fract(time) * step(0.0, sin(time * 3.14159265))));
+	#float step_anim_alt = smoothstep(0.0, 1.0, (fract(time) * step(0.0, sin(time * 3.14159265 - 3.14159265))));
+	#
+	#// Shift column and row coordinates based on alternating grids over time
+	#st.x += step(1.0, mod(st.y, 2.0)) * 2.0 * step_anim;
+	#st.x += (1.0 - step(1.0, mod(st.y, 2.0))) * -2.0 * step_anim;
+	#st.y += step(1.0, mod(st.x, 2.0)) * 2.0 * step_anim_alt;
+	#st.y += (1.0 - step(1.0, mod(st.x, 2.0))) * -2.0 * step_anim_alt;
+	#
+	#// Tile space
+	#st = fract(st);
+	#
+	#// Evaluate custom circle shell function mask
+	#float pct = rings_circle_outline(st, u_ring_radius, u_line_thickness, u_stroke_blur);
+	#
+	#// Return the final vector color composite channel mix
+	#return mix(u_color_bg, u_color_ring, pct);
+#}
+#"""
+
 
 const SRC_NEON_BLUR: String = """
 uniform float u_glow_radius = 0.015; // @label Glow Spread | @min 0.0 | @max 0.05 | @sens 0.001
@@ -995,277 +1560,6 @@ vec2 fx_polar_map(vec2 uv) {
 """
 
 
-const SRC_LINES_COSINE: String = """
-uniform float u_shape_type = 0.0; // @label Shape Selector | @min 0 | @max 4 | @sens 1
-uniform vec2 u_position = vec2(0.0, 0.0); // @label Position Offset | @min -1 | @max 1 | @sens 0.01
-uniform float u_scale = 0.35; // @label Shape Scale | @min 0.05 | @max 1.0 | @sens 0.01
-uniform float u_rotation = 0.0; // @label Rotation | @min -3.1416 | @max 3.1416 | @sens 0.05
-uniform float u_edge_softness = 0.01; // @label Edge Blur | @min 0.001 | @max 0.2 | @sens 0.001
-uniform float u_line_thickness = 0.02; // @label Line Thickness | @min 0.005 | @max 0.2 | @sens 0.002
-uniform float u_palette_frequency = 4.0; // @label Color Ring Density | @min 0.5 | @max 15.0 | @sens 0.1
-uniform float u_color_cycle_speed = 0.5; // @label Color Cycle Speed | @min 0 | @max 3 | @sens 0.05
-
-uniform vec4 u_color_a : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label Wave Center | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_b : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label Wave Amplitude | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_c : source_color = vec4(1.0, 1.0, 1.0, 1.0); // @label Wave Frequency | @min 0 | @max 2 | @sens 0.02
-uniform vec4 u_color_d : source_color = vec4(0.0, 0.33, 0.67, 1.0); // @label Wave Phase | @min 0 | @max 1 | @sens 0.02
-
-vec2 lcos_rotate(vec2 p, float angle) {
-	float s = sin(angle); float c = cos(angle);
-	return vec2(p.x * c - p.y * s, p.x * s + p.y * c);
-}
-
-float sdf_circle_lc(vec2 p, float r) { return length(p) - r; }
-float sdf_box_lc(vec2 p, vec2 b) {
-	vec2 d = abs(p) - b;
-	return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
-}
-float sdf_triangle_lc(vec2 p, float r) {
-	float k = sqrt(3.0); p.x = abs(p.x) - r; p.y = p.y + r / k;
-	if (p.x + k * p.y > 0.0) p = vec2(p.x - k * p.y, -k * p.x - p.y) / 2.0;
-	p.x -= clamp(p.x, -2.0 * r, 0.0); return -length(p) * sign(p.y);
-}
-float sdf_star_lc(vec2 p, float r, float rf) {
-	vec2 k1 = vec2(0.80901699437, -0.58778525229); vec2 k2 = vec2(-0.30901699437, 0.95105651629);
-	p.x = abs(p.x); p -= 2.0 * max(dot(k1, p), 0.0) * k1; p -= 2.0 * max(dot(k2, p), 0.0) * k2; p.x = abs(p.x);
-	vec2 ba = rf * vec2(-k1.y, k1.x) - vec2(0.0, r); vec2 pa = p - vec2(0.0, r);
-	float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0); return length(pa - ba * h) * sign(pa.x * ba.y - pa.y * ba.x);
-}
-float sdf_hexagon_lc(vec2 p, float r) {
-	vec3 k = vec3(-0.866025404, 0.5, 0.577350269); p = abs(p);
-	p -= 2.0 * min(dot(k.xy, p), 0.0) * k.xy; p -= vec2(clamp(p.x, -k.z * r, k.z * r), r);
-	return length(p) * sign(p.y);
-}
-
-vec4 fx_lines_cosine(vec2 uv) {
-	vec2 p = uv - 0.5 - u_position;
-	p = lcos_rotate(p, u_rotation);
-	
-	float distance_score = 0.0;
-	int choice = int(floor(u_shape_type + 0.5));
-	
-	if (choice == 0) { distance_score = sdf_circle_lc(p, u_scale); }
-	else if (choice == 1) { distance_score = sdf_box_lc(p, vec2(u_scale)); }
-	else if (choice == 2) { distance_score = sdf_triangle_lc(p, u_scale * 1.2); }
-	else if (choice == 3) { distance_score = sdf_star_lc(p, u_scale, 0.45); }
-	else { distance_score = sdf_hexagon_lc(p, u_scale); }
-	
-	float line_surface = abs(distance_score) - u_line_thickness;
-	float line_mask = smoothstep(u_edge_softness, 0.0, line_surface);
-	
-	// Drive the color phase globally using the base distance vector
-	float t = (distance_score * u_palette_frequency) + (u_time * u_color_cycle_speed);
-	vec3 cos_color = u_color_a.rgb + u_color_b.rgb * cos(6.28318 * (u_color_c.rgb * t + u_color_d.rgb));
-	
-	return vec4(cos_color * line_mask, 1.0);
-}
-"""
-const SRC_LINES_CHRONO: String = """
-uniform float u_shape_type = 0.0; // @label Shape Selector | @min 0 | @max 4 | @sens 1
-uniform vec2 u_position = vec2(0.0, 0.0); // @label Position Offset | @min -1 | @max 1 | @sens 0.01
-uniform float u_scale = 0.35; // @label Shape Scale | @min 0.05 | @max 1.0 | @sens 0.01
-uniform float u_rotation = 0.0; // @label Rotation | @min -3.1416 | @max 3.1416 | @sens 0.05
-uniform float u_edge_softness = 0.01; // @label Edge Blur | @min 0.001 | @max 0.2 | @sens 0.001
-uniform float u_line_thickness = 0.02; // @label Line Thickness | @min 0.005 | @max 0.2 | @sens 0.002
-uniform float u_color_morph_speed = 0.6; // @label Color Morph Speed | @min 0 | @max 4 | @sens 0.05
-
-uniform vec4 u_color_bg : source_color = vec4(0.01, 0.01, 0.03, 1.0); // @label Background Color | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_line : source_color = vec4(0.1, 0.5, 1.0, 1.0); // @label Wireframe Core | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_glow : source_color = vec4(0.0, 1.0, 0.6, 1.0); // @label Filament Highlight | @min 0 | @max 1 | @sens 0.02
-
-vec2 lchro_rotate(vec2 p, float angle) {
-	float s = sin(angle); float c = cos(angle);
-	return vec2(p.x * c - p.y * s, p.x * s + p.y * c);
-}
-
-float sdf_circle_lch(vec2 p, float r) { return length(p) - r; }
-float sdf_box_lch(vec2 p, vec2 b) {
-	vec2 d = abs(p) - b;
-	return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
-}
-float sdf_triangle_lch(vec2 p, float r) {
-	float k = sqrt(3.0); p.x = abs(p.x) - r; p.y = p.y + r / k;
-	if (p.x + k * p.y > 0.0) p = vec2(p.x - k * p.y, -k * p.x - p.y) / 2.0;
-	p.x -= clamp(p.x, -2.0 * r, 0.0); return -length(p) * sign(p.y);
-}
-float sdf_star_lch(vec2 p, float r, float rf) {
-	vec2 k1 = vec2(0.80901699437, -0.58778525229); vec2 k2 = vec2(-0.30901699437, 0.95105651629);
-	p.x = abs(p.x); p -= 2.0 * max(dot(k1, p), 0.0) * k1; p -= 2.0 * max(dot(k2, p), 0.0) * k2; p.x = abs(p.x);
-	vec2 ba = rf * vec2(-k1.y, k1.x) - vec2(0.0, r); vec2 pa = p - vec2(0.0, r);
-	float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0); return length(pa - ba * h) * sign(pa.x * ba.y - pa.y * ba.x);
-}
-float sdf_hexagon_lch(vec2 p, float r) {
-	vec3 k = vec3(-0.866025404, 0.5, 0.577350269); p = abs(p);
-	p -= 2.0 * min(dot(k.xy, p), 0.0) * k.xy; p -= vec2(clamp(p.x, -k.z * r, k.z * r), r);
-	return length(p) * sign(p.y);
-}
-
-vec4 fx_lines_chrono(vec2 uv) {
-	vec2 p = uv - 0.5 - u_position;
-	p = lchro_rotate(p, u_rotation);
-	
-	float distance_score = 0.0;
-	int choice = int(floor(u_shape_type + 0.5));
-	
-	if (choice == 0) { distance_score = sdf_circle_lch(p, u_scale); }
-	else if (choice == 1) { distance_score = sdf_box_lch(p, vec2(u_scale)); }
-	else if (choice == 2) { distance_score = sdf_triangle_lch(p, u_scale * 1.2); }
-	else if (choice == 3) { distance_score = sdf_star_lch(p, u_scale, 0.45); }
-	else { distance_score = sdf_hexagon_lch(p, u_scale); }
-	
-	float line_surface = abs(distance_score) - u_line_thickness;
-	float line_mask = smoothstep(u_edge_softness, 0.0, line_surface);
-	
-	// Isolate the exact internal center core of the stroke wire path
-	float core_filament = smoothstep(u_line_thickness * 0.4, 0.0, abs(distance_score)) * line_mask;
-	
-	// Calculate color morph timeline values
-	float timeline = sin(u_time * u_color_morph_speed) * 0.5 + 0.5;
-	vec4 morphing_wire = mix(u_color_line, u_color_glow, timeline);
-	vec4 morphing_bg = mix(u_color_bg, u_color_line * 0.15, timeline * 0.3);
-	
-	vec4 final_color = mix(morphing_bg, morphing_wire, line_mask);
-	final_color = mix(final_color, u_color_glow, core_filament * 0.8);
-	
-	return final_color;
-}
-"""
-
-
-const SRC_SHAPES_COSINE: String = """
-uniform float u_shape_type = 0.0; // @label Shape Selector | @min 0 | @max 4 | @sens 1
-uniform vec2 u_position = vec2(0.0, 0.0); // @label Position Offset | @min -1 | @max 1 | @sens 0.01
-uniform float u_scale = 0.35; // @label Shape Scale | @min 0.05 | @max 1.0 | @sens 0.01
-uniform float u_rotation = 0.0; // @label Rotation | @min -3.1416 | @max 3.1416 | @sens 0.05
-uniform float u_edge_softness = 0.01; // @label Edge Blur | @min 0.001 | @max 0.2 | @sens 0.001
-uniform float u_palette_frequency = 4.0; // @label Color Ring Density | @min 0.5 | @max 15.0 | @sens 0.1
-uniform float u_color_cycle_speed = 0.5; // @label Color Cycle Speed | @min 0 | @max 3 | @sens 0.05
-
-uniform vec4 u_color_a : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label Wave Center | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_b : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label Wave Amplitude | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_c : source_color = vec4(1.0, 1.0, 1.0, 1.0); // @label Wave Frequency | @min 0 | @max 2 | @sens 0.02
-uniform vec4 u_color_d : source_color = vec4(0.0, 0.33, 0.67, 1.0); // @label Wave Phase | @min 0 | @max 1 | @sens 0.02
-
-vec2 scos_rotate(vec2 p, float angle) {
-	float s = sin(angle); float c = cos(angle);
-	return vec2(p.x * c - p.y * s, p.x * s + p.y * c);
-}
-
-float sdf_circle_sc(vec2 p, float r) { return length(p) - r; }
-float sdf_box_sc(vec2 p, vec2 b) {
-	vec2 d = abs(p) - b;
-	return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
-}
-float sdf_triangle_sc(vec2 p, float r) {
-	float k = sqrt(3.0); p.x = abs(p.x) - r; p.y = p.y + r / k;
-	if (p.x + k * p.y > 0.0) p = vec2(p.x - k * p.y, -k * p.x - p.y) / 2.0;
-	p.x -= clamp(p.x, -2.0 * r, 0.0); return -length(p) * sign(p.y);
-}
-float sdf_star_sc(vec2 p, float r, float rf) {
-	vec2 k1 = vec2(0.80901699437, -0.58778525229); vec2 k2 = vec2(-0.30901699437, 0.95105651629);
-	p.x = abs(p.x); p -= 2.0 * max(dot(k1, p), 0.0) * k1; p -= 2.0 * max(dot(k2, p), 0.0) * k2; p.x = abs(p.x);
-	vec2 ba = rf * vec2(-k1.y, k1.x) - vec2(0.0, r); vec2 pa = p - vec2(0.0, r);
-	float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0); return length(pa - ba * h) * sign(pa.x * ba.y - pa.y * ba.x);
-}
-float sdf_hexagon_sc(vec2 p, float r) {
-	vec3 k = vec3(-0.866025404, 0.5, 0.577350269); p = abs(p);
-	p -= 2.0 * min(dot(k.xy, p), 0.0) * k.xy; p -= vec2(clamp(p.x, -k.z * r, k.z * r), r);
-	return length(p) * sign(p.y);
-}
-
-vec4 fx_shapes_cosine(vec2 uv) {
-	vec2 p = uv - 0.5 - u_position;
-	p = scos_rotate(p, u_rotation);
-	
-	float distance_score = 0.0;
-	int choice = int(floor(u_shape_type + 0.5));
-	
-	if (choice == 0) { distance_score = sdf_circle_sc(p, u_scale); }
-	else if (choice == 1) { distance_score = sdf_box_sc(p, vec2(u_scale)); }
-	else if (choice == 2) { distance_score = sdf_triangle_sc(p, u_scale * 1.2); }
-	else if (choice == 3) { distance_score = sdf_star_sc(p, u_scale, 0.45); }
-	else { distance_score = sdf_hexagon_sc(p, u_scale); }
-	
-	// Create a sharp cutout mask for the solid shape
-	float shape_mask = smoothstep(u_edge_softness, 0.0, distance_score);
-	
-	// Pass the spatial distance field value into our cyclical cosine generator
-	float t = (distance_score * u_palette_frequency) + (u_time * u_color_cycle_speed);
-	vec3 cos_color = u_color_a.rgb + u_color_b.rgb * cos(6.28318 * (u_color_c.rgb * t + u_color_d.rgb));
-	
-	// Black out the area outside the shape boundary
-	return vec4(cos_color * shape_mask, 1.0);
-}
-"""
-const SRC_SHAPES_CHRONO: String = """
-uniform float u_shape_type = 0.0; // @label Shape Selector | @min 0 | @max 4 | @sens 1
-uniform vec2 u_position = vec2(0.0, 0.0); // @label Position Offset | @min -1 | @max 1 | @sens 0.01
-uniform float u_scale = 0.35; // @label Shape Scale | @min 0.05 | @max 1.0 | @sens 0.01
-uniform float u_rotation = 0.0; // @label Rotation | @min -3.1416 | @max 3.1416 | @sens 0.05
-uniform float u_edge_softness = 0.01; // @label Edge Blur | @min 0.001 | @max 0.2 | @sens 0.001
-uniform float u_color_morph_speed = 0.6; // @label Color Morph Speed | @min 0 | @max 4 | @sens 0.05
-
-uniform vec4 u_color_bg : source_color = vec4(0.01, 0.01, 0.03, 1.0); // @label Background Color | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_shape : source_color = vec4(0.9, 0.2, 0.4, 1.0); // @label Shape Core | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_rim : source_color = vec4(0.0, 1.0, 0.8, 1.0); // @label Rim Highlight | @min 0 | @max 1 | @sens 0.02
-
-vec2 schro_rotate(vec2 p, float angle) {
-	float s = sin(angle); float c = cos(angle);
-	return vec2(p.x * c - p.y * s, p.x * s + p.y * c);
-}
-
-float sdf_circle_sch(vec2 p, float r) { return length(p) - r; }
-float sdf_box_sch(vec2 p, vec2 b) {
-	vec2 d = abs(p) - b;
-	return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
-}
-float sdf_triangle_sch(vec2 p, float r) {
-	float k = sqrt(3.0); p.x = abs(p.x) - r; p.y = p.y + r / k;
-	if (p.x + k * p.y > 0.0) p = vec2(p.x - k * p.y, -k * p.x - p.y) / 2.0;
-	p.x -= clamp(p.x, -2.0 * r, 0.0); return -length(p) * sign(p.y);
-}
-float sdf_star_sch(vec2 p, float r, float rf) {
-	vec2 k1 = vec2(0.80901699437, -0.58778525229); vec2 k2 = vec2(-0.30901699437, 0.95105651629);
-	p.x = abs(p.x); p -= 2.0 * max(dot(k1, p), 0.0) * k1; p -= 2.0 * max(dot(k2, p), 0.0) * k2; p.x = abs(p.x);
-	vec2 ba = rf * vec2(-k1.y, k1.x) - vec2(0.0, r); vec2 pa = p - vec2(0.0, r);
-	float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0); return length(pa - ba * h) * sign(pa.x * ba.y - pa.y * ba.x);
-}
-float sdf_hexagon_sch(vec2 p, float r) {
-	vec3 k = vec3(-0.866025404, 0.5, 0.577350269); p = abs(p);
-	p -= 2.0 * min(dot(k.xy, p), 0.0) * k.xy; p -= vec2(clamp(p.x, -k.z * r, k.z * r), r);
-	return length(p) * sign(p.y);
-}
-
-vec4 fx_shapes_chrono(vec2 uv) {
-	vec2 p = uv - 0.5 - u_position;
-	p = schro_rotate(p, u_rotation);
-	
-	float distance_score = 0.0;
-	int choice = int(floor(u_shape_type + 0.5));
-	
-	if (choice == 0) { distance_score = sdf_circle_sch(p, u_scale); }
-	else if (choice == 1) { distance_score = sdf_box_sch(p, vec2(u_scale)); }
-	else if (choice == 2) { distance_score = sdf_triangle_sch(p, u_scale * 1.2); }
-	else if (choice == 3) { distance_score = sdf_star_sch(p, u_scale, 0.45); }
-	else { distance_score = sdf_hexagon_sch(p, u_scale); }
-	
-	float shape_mask = smoothstep(u_edge_softness, 0.0, distance_score);
-	
-	// Create an inline inner glow mask tracking the shape's boundary rim
-	float rim_mask = smoothstep(-0.06, 0.0, distance_score) * shape_mask;
-	
-	// Time-based color morph interpolation shifts
-	float timeline = sin(u_time * u_color_morph_speed) * 0.5 + 0.5;
-	vec4 morphing_core = mix(u_color_shape, u_color_rim, timeline);
-	vec4 morphing_bg = mix(u_color_bg, u_color_shape * 0.2, timeline * 0.4);
-	
-	// Composite background, core face, and illuminated rim together
-	vec4 final_color = mix(morphing_bg, morphing_core, shape_mask);
-	final_color = mix(final_color, u_color_rim, rim_mask * 0.7);
-	
-	return final_color;
-}
-"""
 
 
 const SRC_BASIC_LINES: String = """

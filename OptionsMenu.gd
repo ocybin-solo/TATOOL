@@ -61,6 +61,7 @@ var tweak_row: int = 0
 var sens_idx: int = DEFAULT_SENS_INDEX
 
 var presets # PresetsMenu.gd (System Main Menu > PRESETS)
+var lab # TransitionLab.gd (System Main Menu > SCREENSAVER DEV, and the OPT lab menu)
 
 var layout # ControllerLayout.gd (button grid, orientation, swaps, screen flip, icons)
 var ctx_button: String = "" # the button chosen in the icon list
@@ -82,6 +83,9 @@ func setup(main_manager) -> void:
 	_apply_all()
 	layout = load("res://ControllerLayout.gd").new()
 	layout.setup(main, self)
+	lab = load("res://TransitionLab.gd").new()
+	main.add_child(lab) # a Node, so it can run every frame during a transition
+	lab.setup(main, self)
 
 func _read_default_button_color() -> Color:
 	var buttons: Array = _collect_buttons(main.ui_canvas_layer)
@@ -217,11 +221,25 @@ func open() -> void:
 func is_active() -> bool:
 	if presets != null and presets.is_active():
 		return true
+	if lab != null and lab.menu_active():
+		return true
 	return is_open and is_instance_valid(_panel_ref) and main.menu_overlay_panel == _panel_ref
 
 ## System Main Menu > PRESETS
 func open_presets() -> void:
 	presets.open()
+
+## Screensaver developer mode (see TransitionLab.gd)
+func dev_mode() -> bool:
+	return lab != null and lab.dev_mode
+
+func toggle_dev_mode() -> void:
+	if lab != null:
+		lab.toggle_dev_mode()
+
+## D-pad / A / B while developer mode is on and no menu is open. Returns true when it handled the press.
+func dev_input(action: String) -> bool:
+	return lab != null and lab.dev_input(action)
 
 
 # =========================================================================
@@ -230,6 +248,9 @@ func open_presets() -> void:
 func handle_vertical(step: int) -> void:
 	if presets != null and presets.is_active():
 		presets.handle_vertical(step)
+		return
+	if lab != null and lab.menu_active():
+		lab.handle_vertical(step)
 		return
 	if mode == Mode.REPOSITION:
 		return # the grid overlay owns all touches while repositioning
@@ -248,6 +269,9 @@ func handle_horizontal(step: int) -> void:
 	if presets != null and presets.is_active():
 		presets.handle_horizontal(step)
 		return
+	if lab != null and lab.menu_active():
+		lab.handle_horizontal(step)
+		return
 	if mode != Mode.TWEAK:
 		return
 	if tweak_row == 0:
@@ -260,6 +284,9 @@ func handle_horizontal(step: int) -> void:
 func handle_a() -> void:
 	if presets != null and presets.is_active():
 		presets.handle_a()
+		return
+	if lab != null and lab.menu_active():
+		lab.handle_a()
 		return
 	if mode == Mode.REPOSITION:
 		return
@@ -314,6 +341,8 @@ func handle_a() -> void:
 func handle_b() -> bool:
 	if presets != null and presets.is_active():
 		return presets.handle_b()
+	if lab != null and lab.menu_active():
+		return lab.handle_b()
 	if mode == Mode.REPOSITION:
 		return false
 	match mode:

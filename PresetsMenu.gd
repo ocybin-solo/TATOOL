@@ -251,6 +251,7 @@ func _load_preset(entry: Dictionary) -> bool:
 		status = "COULD NOT READ THAT FILE"
 		return false
 	var lib = main.library
+	var old_stacks: Array = main.pass_stack.duplicate(true)
 
 	# 1) Which formulas are active, and the raw saved values
 	for p in range(3):
@@ -280,7 +281,11 @@ func _load_preset(entry: Dictionary) -> bool:
 	for p in range(3):
 		var built: Dictionary = lib.assemble_pass(p, main.pass_stack[p])
 		_sanitize(built["uniforms"], main.pass_values[p])
-		main.rebuild_pass(p)
+		if old_stacks[p] == main.pass_stack[p]:
+			# Same formulas as before: only the values changed, so skip the (slow) shader rebuild
+			lib.apply_values(main._pass_material(p), main.pass_records[p], main.pass_values[p])
+		else:
+			main.rebuild_pass(p)
 	return true
 
 func _sanitize(records: Array, values: Dictionary) -> void:

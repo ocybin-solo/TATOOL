@@ -98,6 +98,8 @@ func _make_repeating(btn: BaseButton, handler: Callable) -> void:
 	btn.button_up.connect(_stop_repeat)
 
 func _start_repeat(btn: BaseButton, handler: Callable) -> void:
+	if active_state == ControlState.HIDDEN and options_menu and options_menu.dev_mode():
+		return # no turbo in screensaver developer mode
 	_repeat_button = btn
 	_repeat_handler = handler
 	_repeat_next_msec = Time.get_ticks_msec() + REPEAT_DELAY_MSEC
@@ -123,6 +125,10 @@ func _process(_delta: float) -> void:
 		_repeat_handler.call()
 
 
+## First row of the main menu (MainManager.redraw_system_power_menu asks for this text).
+func dev_menu_label() -> String:
+	return "🧪 SCREENSAVER DEV [%s]" % ("ON" if options_menu != null and options_menu.dev_mode() else "OFF")
+
 func _boot_options_menu() -> void:
 	var main_manager = get_tree().get_first_node_in_group("main_manager")
 	if not main_manager: return
@@ -144,7 +150,7 @@ func setup_ui_layout() -> void:
 
 	# A Button (✔ ACCEPT)
 	btn_channel = Button.new()
-	btn_channel.text = "🟢"
+	btn_channel.text = "▢"
 	btn_channel.custom_minimum_size = Vector2(96, 96)
 	btn_channel.add_theme_font_size_override("font_size", 36)
 	btn_channel.add_theme_color_override("font_color", Color.GREEN)
@@ -158,7 +164,7 @@ func setup_ui_layout() -> void:
 
 	# B Button (❌ BACK)
 	btn_sens_left = Button.new()
-	btn_sens_left.text = "🔴"
+	btn_sens_left.text = "▢"
 	btn_sens_left.custom_minimum_size = Vector2(96, 96)
 	btn_sens_left.add_theme_font_size_override("font_size", 36)
 	btn_sens_left.add_theme_color_override("font_color", Color.RED)
@@ -231,6 +237,8 @@ func _on_dpad_down() -> void:
 
 func _nav_vertical(step: int) -> void:
 	var main_manager = get_tree().get_first_node_in_group("main_manager")
+	# Screensaver developer mode: with no menu open, up / down cycle the transition time
+	if active_state == ControlState.HIDDEN and options_menu and options_menu.dev_input("up" if step < 0 else "down"): return
 	if not main_manager or active_state == ControlState.HIDDEN: return
 
 	match active_state:
@@ -267,6 +275,8 @@ func _on_dpad_right() -> void:
 	_nav_horizontal(1)
 
 func _nav_horizontal(step: int) -> void:
+	# Screensaver developer mode: with no menu open, left / right run a transition to the previous / next preset
+	if active_state == ControlState.HIDDEN and options_menu and options_menu.dev_input("left" if step < 0 else "right"): return
 	if active_state == ControlState.SYSTEM_MENU and options_menu and options_menu.is_active():
 		options_menu.handle_horizontal(step)
 		return
@@ -305,6 +315,7 @@ func _on_action_button_b() -> void:
 	# 5-TIER POP BACKWARDS ROUTER
 	var main_manager = get_tree().get_first_node_in_group("main_manager")
 	if not main_manager: return
+	if active_state == ControlState.HIDDEN and options_menu and options_menu.dev_input("b"): return # aborts a running transition
 
 	match active_state:
 		ControlState.SYSTEM_MENU:
@@ -377,6 +388,7 @@ func _reset_effect_passes(main_manager) -> void:
 func _on_action_button_a() -> void:
 	var main_manager = get_tree().get_first_node_in_group("main_manager")
 	if not main_manager: return
+	if active_state == ControlState.HIDDEN and options_menu and options_menu.dev_input("a"): return
 
 	match active_state:
 		ControlState.HIDDEN:
@@ -387,7 +399,11 @@ func _on_action_button_a() -> void:
 				options_menu.handle_a()
 				return
 			match system_menu_index:
-				0: _on_action_button_b()
+				0:
+					# SCREENSAVER DEV: switch the mode on / off; the menu stays open until B is pressed
+					if options_menu:
+						options_menu.toggle_dev_mode()
+						main_manager.redraw_system_power_menu()
 				1:
 					if options_menu:
 						options_menu.open()
