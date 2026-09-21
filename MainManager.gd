@@ -23,7 +23,7 @@ var menu_center_host: CenterContainer
 # --- SELECT PASS OVERLAY HOOKS ---
 var select_pass_overlay_panel: PanelContainer
 var select_pass_list_box: VBoxContainer
-const PASS_LABELS: Array = ["PASS 1: BASE PATTERN", "PASS 2: WARPING", "PASS 3: FILTERS"]
+const PASS_LABELS: Array = ["PASS 1: BASE PATTERN", "PASS 2: WARPING", "PASS 3: FILTERS", "RESET ALL PARAMETERS"]
 
 # --- UNIFIED MENU STATE (only one overlay + one morphed button at a time) ---
 enum MenuKind { NONE, SELECT_PASS, SHADER_MENU }
@@ -222,7 +222,7 @@ func setup_interface_layer() -> void:
 
 	# 🌟 OPT Button on BOTTOM
 	btn_select_pass = Button.new()
-	btn_select_pass.text = "📜\n"
+	btn_select_pass.text = "🔵\n"
 	btn_select_pass.custom_minimum_size = Vector2(96, 96)
 	btn_select_pass.size_flags_vertical = Control.SIZE_SHRINK_END
 	btn_select_pass.add_theme_color_override("font_color", Color.CORNFLOWER_BLUE)
@@ -236,7 +236,7 @@ func setup_interface_layer() -> void:
 	utility_trench.add_child(util_spacer)
 		# 🌟 PWR Button on TOP
 	btn_shader_menu = Button.new()
-	btn_shader_menu.text = "⚙\n"
+	btn_shader_menu.text = "🟡\n"
 	btn_shader_menu.custom_minimum_size = Vector2(96, 96)
 	btn_shader_menu.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	btn_shader_menu.add_theme_color_override("font_color", Color.GOLD)
@@ -333,10 +333,11 @@ func redraw_select_pass_menu() -> void:
 	var p3_is_active = pass_stack[2].size() > 0
 	
 	var pass_statuses = [
-		"[ACTIVE]",
-		"[ACTIVE]" if p2_is_active else "[BYPASS]",
-		"[ACTIVE]" if p3_is_active else "[BYPASS]"
-	]
+			"[ACTIVE]",
+			"[ACTIVE]" if p2_is_active else "[BYPASS]",
+			"[ACTIVE]" if p3_is_active else "[BYPASS]",
+			""
+		]
 
 	for i in range(PASS_LABELS.size()):
 		var lbl = Label.new()

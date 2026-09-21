@@ -420,7 +420,7 @@ func _register_builtin_recipes() -> void:
 	_register("lines_chrono", PASS_PATTERN, "GEOMETRY: WIREFRAME CHRONO", SRC_LINES_CHRONO, false)  
  
 
-	# Pass 2 (Warp Modules) - Stackable!
+	#######  PASS 2 ########### (Warp Modules) - Stackable!
 	_register("kaleidoscope", PASS_WARP, "KALEIDOSCOPE REFLECTION", SRC_KALEIDOSCOPE, true)
 	_register("swirl", PASS_WARP, "RADIAL SWIRL", SRC_SWIRL, true)
 	_register("polar_map", PASS_WARP, "POLAR TUNNEL MAP", SRC_POLAR_MAP, true) 
@@ -431,7 +431,7 @@ func _register_builtin_recipes() -> void:
 	_register("fisheye_bulb", PASS_WARP, "FISHEYE BULB LENS", SRC_FISHEYE_BULB, true)
 	
 	
-	# Pass 3 - filters
+	#########  Pass 3 ###########   - filters
 	_register("edge_glow", PASS_FILTER, "ANALOG EDGE GLOW", SRC_EDGE_GLOW, false)
 	_register("crt_screen", PASS_FILTER, "📺 CRT MONITOR SIMULATOR", SRC_CRT_SCREEN, false)
 	_register("vhs_glitch", PASS_FILTER, "📼 VHS TAPE GLITCH", SRC_VHS_GLITCH, false)
@@ -441,8 +441,49 @@ func _register_builtin_recipes() -> void:
 	_register("halftone_dots", PASS_FILTER, "🎨 HALFTONE DOT MATRIX", SRC_HALFTONE_DOTS, false)
 	_register("ascii_art", PASS_FILTER, "📟 ASCII CHARACTER TERMINAL", SRC_ASCII_ART, false)
 	_register("oil_painting", PASS_FILTER, "🖌️ OIL PAINTING CANVAS", SRC_OIL_PAINTING, false)
+	_register("neon_blur", PASS_FILTER, "🔮 NEON GLOW BLUR", SRC_NEON_BLUR, false)
 
+const SRC_NEON_BLUR: String = """
+uniform float u_glow_radius = 0.015; // @label Glow Spread | @min 0.0 | @max 0.05 | @sens 0.001
+uniform float u_glow_intensity = 2.0; // @label Neon Intensity | @min 0.0 | @max 5.0 | @sens 0.05
+uniform float u_glow_threshold = 0.3; // @label Highlight Cutoff | @min 0.0 | @max 1.0 | @sens 0.02
+uniform vec4 u_neon_tint : source_color = vec4(1.0, 1.0, 1.0, 1.0); // @label Neon Color Tint | @min 0 | @max 1 | @sens 0.02
 
+vec4 fx_neon_blur(vec2 uv) {
+	// 1. Sample the crisp original base image
+	vec4 base_color = texture(u_warped_texture, uv);
+	
+	// 2. Multi-tap box blur sampling matrix to extract and spread local light
+	vec4 glow_acc = vec4(0.0);
+	float total_weight = 0.0;
+	
+	// Directional sampling offsets for a smooth 2D blur spread
+	vec2 offsets[8] = vec2[](
+		vec2(-1.0, -1.0), vec2(0.0, -1.0), vec2(1.0, -1.0),
+		vec2(-1.0,  0.0),                  vec2(1.0,  0.0),
+		vec2(-1.0,  1.0), vec2(0.0,  1.0), vec2(1.0,  1.0)
+	);
+	
+	for (int i = 0; i < 8; i++) {
+		vec2 sample_uv = uv + offsets[i] * u_glow_radius;
+		vec4 tex_sample = texture(u_warped_texture, clamp(sample_uv, 0.0, 1.0));
+		
+		// Measure luminance to see if the pixel passes our highlight threshold cutoff
+		float luma = dot(tex_sample.rgb, vec3(0.299, 0.587, 0.114));
+		
+		// If it's bright enough, isolate it and add it to our glow accumulator
+		float highlight_mask = smoothstep(u_glow_threshold, u_glow_threshold + 0.1, luma);
+		glow_acc += tex_sample * highlight_mask;
+		total_weight += 1.0;
+	}
+	
+	// Calculate final averaged glow layer and apply user intensity and color tinting overrides
+	vec3 final_glow = (glow_acc.rgb / max(total_weight, 1.0)) * u_glow_intensity * u_neon_tint.rgb;
+	
+	// 3. Layer the soft blurred neon light directly over the original crisp lines
+	return vec4(base_color.rgb + final_glow, base_color.a);
+}
+"""
 
 
 

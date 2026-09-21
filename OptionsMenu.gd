@@ -1,12 +1,13 @@
 extends RefCounted
 ## OptionsMenu.gd -- TATOOL app options (System Main Menu > APP CONFIG OPTIONS)
-## Colors (background + button colors) and Controller Layout (landscape / portrait, each with mirrors).
-## It also owns PresetsMenu.gd, so DynamicUI only ever talks to this one object.
+## Colors (background + button colors) and Controller Layout (drag-and-drop button positions, screen flip,
+## icon and menu rotation, screen orientation).
+## It owns PresetsMenu.gd and ControllerLayout.gd, so DynamicUI only ever talks to this one object.
 ## Everything is saved to user:// and re-applied at launch.
 ##
 ## The menu is driven by TREE. Row kinds:
 ##   "go"     open the submenu named in "target"
-##   "choice" pick one value of a setting (the active one shows a filled dot)
+##   (the Controller Layout screens are built on the fly from ControllerLayout: see _rows_for())
 ##   "color"  edit the color stored under "key" (channel picker, then tweak console)
 ##   "action" run a named action
 ## DynamicUI forwards D-pad / A / B to this object while is_active() is true.
@@ -16,7 +17,7 @@ const SENS_LADDER: Array = [0.002, 0.01, 0.02, 0.1, 0.2] # index 2 is the recomm
 const DEFAULT_SENS_INDEX: int = 2
 const BUTTON_STATES: Array = ["normal", "hover", "pressed", "hover_pressed"]
 
-enum Mode { LIST, CHANNEL, TWEAK }
+enum Mode { LIST, CHANNEL, TWEAK, REPOSITION }
 
 const TREE: Dictionary = {
 	"root": {
@@ -34,34 +35,7 @@ const TREE: Dictionary = {
 			{"label": "[ RESET COLORS TO DEFAULT ]", "kind": "action", "action": "reset_colors"},
 		],
 	},
-	"layout": {
-		"title": " 🎮 CONTROLLER LAYOUT ",
-		"rows": [
-			{"label": "LANDSCAPE", "kind": "go", "target": "landscape"},
-			{"label": "PORTRAIT", "kind": "go", "target": "portrait"},
-		],
-	},
-	# Picking a row sets that orientation AND that mirror layout (0 standard, 1 horizontal, 2 vertical, 3 both)
-	"landscape": {
-		"title": " LANDSCAPE LAYOUT ",
-		"cursor_from": "landscape_layout", # open with the cursor on the layout currently in use
-		"rows": [
-			{"label": "STANDARD", "kind": "choice", "setting": "landscape_layout", "orientation": 0, "value": 0},
-			{"label": "MIRRORED HORIZONTALLY", "kind": "choice", "setting": "landscape_layout", "orientation": 0, "value": 1},
-			{"label": "MIRRORED VERTICALLY", "kind": "choice", "setting": "landscape_layout", "orientation": 0, "value": 2},
-			{"label": "MIRRORED HORIZ + VERT", "kind": "choice", "setting": "landscape_layout", "orientation": 0, "value": 3},
-		],
-	},
-	"portrait": {
-		"title": " PORTRAIT LAYOUT ",
-		"cursor_from": "portrait_layout",
-		"rows": [
-			{"label": "STANDARD", "kind": "choice", "setting": "portrait_layout", "orientation": 1, "value": 0},
-			{"label": "MIRRORED HORIZONTALLY", "kind": "choice", "setting": "portrait_layout", "orientation": 1, "value": 1},
-			{"label": "MIRRORED VERTICALLY", "kind": "choice", "setting": "portrait_layout", "orientation": 1, "value": 2},
-			{"label": "MIRRORED HORIZ + VERT", "kind": "choice", "setting": "portrait_layout", "orientation": 1, "value": 3},
-		],
-	},
+	# "layout", "icons", "icon_actions" and "menu_orient" are built at runtime by _rows_for() / _title_for()
 }
 
 # Background alpha has no visible effect on a window clear color, so it only gets R, G, B.
@@ -74,7 +48,7 @@ var main # MainManager (owner of the menu panel and drawing helpers)
 
 var settings: Dictionary = {}
 var defaults: Dictionary = {}
-var custom: Dictionary = {"bg_color": false, "button_color": false, "orientation": false}
+var custom: Dictionary = {"bg_color": false, "button_color": false}
 
 var is_open: bool = false
 var _panel_ref: Object = null
@@ -88,22 +62,8 @@ var sens_idx: int = DEFAULT_SENS_INDEX
 
 var presets # PresetsMenu.gd (System Main Menu > PRESETS)
 
-# Controller layout. Nodes are found from the existing buttons; their original ("standard") arrangement is
-# remembered so every layout is rebuilt from it and never drifts.
-var _layout_ready: bool = false
-var _flex_root: BoxContainer   # replaces the fixed HBox root: display | strip | controls (vertical in portrait)
-var _strip: BoxContainer       # replaces the fixed VBox trench: PWR / spacer / OPT (horizontal in portrait)
-var _host                      # square host of the shader display
-var _action_row
-var _chassis
-var _dpad
-var _std_root: Array = []
-var _std_strip: Array = []
-var _std_action: Array = []
-var _std_chassis: Array = []
-var _std_host_vflag: int = 0
-var _std_chassis_hflag: int = 0
-var _std_dpad_flag: int = 0
+var layout # ControllerLayout.gd (button grid, orientation, swaps, screen flip, icons)
+var ctx_button: String = "" # the button chosen in the icon list
 
 
 # =========================================================================
@@ -118,14 +78,10 @@ func setup(main_manager) -> void:
 	defaults["button_color"] = _read_default_button_color()
 	settings["bg_color"] = defaults["bg_color"]
 	settings["button_color"] = defaults["button_color"]
-	settings["landscape_layout"] = 0
-	settings["portrait_layout"] = 0
-	settings["orientation"] = 0 # 0 landscape, 1 portrait
-	_capture_standard_layout() # before any saved layout is applied
-	if _layout_ready:
-		main.get_window().size_changed.connect(_on_window_resized)
 	_load_settings()
 	_apply_all()
+	layout = load("res://ControllerLayout.gd").new()
+	layout.setup(main, self)
 
 func _read_default_button_color() -> Color:
 	var buttons: Array = _collect_buttons(main.ui_canvas_layer)
@@ -145,21 +101,13 @@ func _load_settings() -> void:
 			if c is Color:
 				settings[key] = c
 				custom[key] = true
-	settings["landscape_layout"] = clampi(int(cfg.get_value("layout", "landscape_layout", 0)), 0, 3)
-	settings["portrait_layout"] = clampi(int(cfg.get_value("layout", "portrait_layout", 0)), 0, 3)
-	settings["orientation"] = clampi(int(cfg.get_value("layout", "orientation", 0)), 0, 1)
-	custom["orientation"] = bool(cfg.get_value("layout", "orientation_custom", false))
 
 func _save_settings() -> void:
 	var cfg := ConfigFile.new()
-	cfg.load(SETTINGS_PATH) # keep sections that later steps add (layout, orientation)
+	cfg.load(SETTINGS_PATH) # keep the sections owned by ControllerLayout and PresetsMenu
 	for key in ["bg_color", "button_color"]:
 		cfg.set_value("colors", key + "_custom", custom[key])
 		cfg.set_value("colors", key, settings[key])
-	cfg.set_value("layout", "landscape_layout", settings["landscape_layout"])
-	cfg.set_value("layout", "portrait_layout", settings["portrait_layout"])
-	cfg.set_value("layout", "orientation", settings["orientation"])
-	cfg.set_value("layout", "orientation_custom", custom["orientation"])
 	cfg.save(SETTINGS_PATH)
 
 
@@ -169,7 +117,6 @@ func _save_settings() -> void:
 func _apply_all() -> void:
 	_apply_background()
 	_apply_buttons()
-	_apply_layout()
 
 ## Background = the window color behind the whole console (the shader display is unaffected).
 func _apply_background() -> void:
@@ -248,140 +195,10 @@ func _reset_colors() -> void:
 	_save_settings()
 
 
-# =========================================================================
-# CONTROLLER LAYOUT (landscape + portrait, each with mirrors)
-# Your own button code is never rebuilt. Containers are found from the existing buttons, and
-# only their child ORDER and a few size flags change. Two fixed containers are swapped once for
-# flexible ones (BoxContainer) that can switch between horizontal and vertical.
-#   landscape:  display | strip (vertical) | controls          (side by side)
-#   portrait:   display / strip (horizontal) / controls        (stacked)
-# Mirrors: horizontal flips left-right, vertical flips top-bottom, whichever way the axes run.
-# =========================================================================
-func _capture_standard_layout() -> void:
-	var cp = main.control_panel
-	var old_root = cp.get_parent()
-	var old_trench = main.btn_shader_menu.get_parent()
-	var host = main.canvas_container.get_parent()
-	var action_row = cp.btn_channel.get_parent()
-	var chassis = action_row.get_parent() if action_row else null
-	var dpad = cp.btn_param_up.get_parent()
-	if old_root == null or old_trench == null or host == null or action_row == null or chassis == null or dpad == null:
-		push_warning("OptionsMenu: controller layout containers not found; layout options disabled")
-		return
-
-	_host = host
-	_action_row = action_row
-	_chassis = chassis
-	_dpad = dpad
-	_std_action = action_row.get_children()
-	_std_chassis = chassis.get_children()
-	_std_host_vflag = host.size_flags_vertical
-	_std_chassis_hflag = chassis.size_flags_horizontal
-	_std_dpad_flag = dpad.size_flags_horizontal
-
-	# The trench becomes a BoxContainer whose direction can flip (its spacer must stretch both ways)
-	_strip = BoxContainer.new()
-	_strip.alignment = BoxContainer.ALIGNMENT_CENTER
-	_std_strip = old_trench.get_children()
-	for kid in _std_strip:
-		old_trench.remove_child(kid)
-		_strip.add_child(kid)
-		if not (kid is Button):
-			kid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-
-	# So does the main root: same children, same order, same flags, new container
-	_flex_root = BoxContainer.new()
-	_flex_root.mouse_filter = Control.MOUSE_FILTER_PASS
-	main.ui_canvas_layer.add_child(_flex_root)
-	_flex_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_std_root = []
-	for kid in old_root.get_children():
-		old_root.remove_child(kid)
-		if kid == old_trench:
-			_flex_root.add_child(_strip)
-			_std_root.append(_strip)
-		else:
-			_flex_root.add_child(kid)
-			_std_root.append(kid)
-	old_trench.queue_free()
-	old_root.queue_free()
-
-	# Moving the display's nodes can drop their texture links, so re-bind them
-	main.pass2_material.set_shader_parameter("u_pattern_texture", main.pass1_viewport.get_texture())
-	main.pass3_material.set_shader_parameter("u_warped_texture", main.pass2_viewport.get_texture())
-	_layout_ready = true
-
-## Ask the device (or desktop window) for the chosen orientation. Only done once the user has chosen one.
-func _apply_layout() -> void:
-	if not _layout_ready:
-		return
-	if custom["orientation"]:
-		_request_orientation(int(settings["orientation"]) == 1)
-	_relayout()
-
-func _request_orientation(portrait: bool) -> void:
-	var size_now: Vector2i = DisplayServer.window_get_size()
-	if (size_now.y > size_now.x) == portrait:
-		return # the window already has that shape
-	if OS.has_feature("mobile"):
-		DisplayServer.screen_set_orientation(DisplayServer.SCREEN_PORTRAIT if portrait else DisplayServer.SCREEN_LANDSCAPE)
-	else:
-		main.get_window().size = Vector2i(size_now.y, size_now.x) # desktop: swap width and height
-	# The new size arrives a moment later; _on_window_resized() then re-fits everything
-
-func _on_window_resized() -> void:
-	if presets != null and presets.typing:
-		return # the on-screen keyboard can resize the window; re-check once typing ends
-	_relayout()
-
-## Called by PresetsMenu when the name field loses focus.
+## Called by PresetsMenu when the name field loses focus: re-check the layout in case the keyboard resized the window.
 func notify_typing_done() -> void:
-	_relayout()
-
-## Arrange everything for the window's CURRENT shape (tall = portrait) using that shape's saved layout.
-func _relayout() -> void:
-	if not _layout_ready:
-		return
-	var win_size: Vector2i = DisplayServer.window_get_size()
-	var portrait: bool = win_size.y > win_size.x
-	var index: int = int(settings["portrait_layout"]) if portrait else int(settings["landscape_layout"])
-	var flip_h: bool = index == 1 or index == 3
-	var flip_v: bool = index == 2 or index == 3
-	var side: int = mini(win_size.x, win_size.y) # the display is always a square of the short side
-
-	# Directions
-	_flex_root.vertical = portrait
-	_strip.vertical = not portrait
-	_strip.custom_minimum_size = Vector2(0, 96) if portrait else Vector2(96, 0)
-
-	# Order: start from standard, reverse whichever containers run along the flipped axis
-	_set_order(_flex_root, _std_root, flip_v if portrait else flip_h)
-	_set_order(_strip, _std_strip, flip_h if portrait else flip_v)
-	_set_order(_action_row, _std_action, flip_h)   # A and B swap sides (a true mirror)
-	_set_order(_chassis, _std_chassis, flip_v)     # D-pad above, A/B below
-	_dpad.size_flags_horizontal = Control.SIZE_SHRINK_END if flip_h else _std_dpad_flag
-
-	# Portrait: shrink the controls to their natural width and center them, which brings
-	# the D-pad and A/B together exactly as tuned instead of stretching across the wide screen
-	_chassis.size_flags_horizontal = Control.SIZE_SHRINK_CENTER if portrait else _std_chassis_hflag
-
-	# The shader display stays square: host, container, the three buffers and their rectangles
-	_host.custom_minimum_size = Vector2(side, side)
-	_host.size_flags_vertical = Control.SIZE_FILL if portrait else _std_host_vflag
-	main.canvas_container.custom_minimum_size = Vector2(side, side)
-	# (pass 3 sits inside the stretching SubViewportContainer, which sizes it by itself)
-	for vp in [main.pass1_viewport, main.pass2_viewport]:
-		vp.size = Vector2i(side, side)
-	for rect in [main.pass1_rect, main.pass2_rect, main.pass3_rect]:
-		rect.custom_minimum_size = Vector2(side, side)
-		rect.size = Vector2(side, side)
-
-func _set_order(container: Node, nodes: Array, reversed: bool) -> void:
-	var list: Array = nodes.duplicate()
-	if reversed:
-		list.reverse()
-	for i in range(list.size()):
-		container.move_child(list[i], i)
+	if layout != null:
+		layout.relayout()
 
 
 # =========================================================================
@@ -414,10 +231,12 @@ func handle_vertical(step: int) -> void:
 	if presets != null and presets.is_active():
 		presets.handle_vertical(step)
 		return
+	if mode == Mode.REPOSITION:
+		return # the grid overlay owns all touches while repositioning
 	match mode:
 		Mode.LIST:
 			var node_id: String = node_stack.back()
-			var total: int = TREE[node_id]["rows"].size()
+			var total: int = _rows_for(node_id).size()
 			cursors[node_id] = posmod(int(cursors.get(node_id, 0)) + step, total)
 		Mode.CHANNEL:
 			channel_idx = posmod(channel_idx + step, COLOR_DEFS[active_key]["channels"].size())
@@ -442,23 +261,39 @@ func handle_a() -> void:
 	if presets != null and presets.is_active():
 		presets.handle_a()
 		return
+	if mode == Mode.REPOSITION:
+		return
 	match mode:
 		Mode.LIST:
 			var node_id: String = node_stack.back()
-			var rows: Array = TREE[node_id]["rows"]
-			var row: Dictionary = rows[int(cursors.get(node_id, 0))]
+			var rows: Array = _rows_for(node_id)
+			var row: Dictionary = rows[clampi(int(cursors.get(node_id, 0)), 0, rows.size() - 1)]
+			var orient: int = layout.current_orient() # layout settings apply to the orientation you are in
 			match row["kind"]:
 				"go":
-					var target: String = row["target"]
-					node_stack.append(target)
-					if TREE[target].has("cursor_from"):
-						cursors[target] = int(settings[TREE[target]["cursor_from"]])
-				"choice":
-					settings[row["setting"]] = int(row["value"])
-					settings["orientation"] = int(row["orientation"])
-					custom["orientation"] = true
-					_apply_layout()
-					_save_settings()
+					node_stack.append(row["target"])
+					cursors[row["target"]] = 0
+				"reposition":
+					layout.begin_edit()
+					mode = Mode.REPOSITION
+				"flip_screen":
+					layout.toggle_flip_screen(orient)
+				"orient_mode":
+					layout.set_orient_mode((layout.orient_mode + 1) % 3)
+				"reset_layout":
+					layout.reset(orient)
+				"icon_go":
+					ctx_button = row["button"]
+					node_stack.append("icon_actions")
+					cursors["icon_actions"] = 0
+				"icon_flip":
+					layout.flip_icon(orient, ctx_button)
+				"icon_rotate":
+					layout.rotate_icon(orient, ctx_button)
+				"menu_flip":
+					layout.flip_menu()
+				"menu_rotate":
+					layout.rotate_menu()
 				"color":
 					active_key = row["key"]
 					channel_idx = 0
@@ -479,6 +314,8 @@ func handle_a() -> void:
 func handle_b() -> bool:
 	if presets != null and presets.is_active():
 		return presets.handle_b()
+	if mode == Mode.REPOSITION:
+		return false
 	match mode:
 		Mode.TWEAK:
 			mode = Mode.CHANNEL
@@ -493,6 +330,72 @@ func handle_b() -> bool:
 				return true
 	redraw()
 	return false
+
+## Called by ControllerLayout when a Reposition session ends (A tapped: accepted, B tapped: cancelled).
+func reposition_finished(_accepted: bool) -> void:
+	mode = Mode.LIST
+	redraw()
+
+
+# =========================================================================
+# MENU CONTENT: fixed screens come from TREE, the Controller Layout screens are built from ControllerLayout
+# =========================================================================
+func _rows_for(node_id: String) -> Array:
+	match node_id:
+		"layout":
+			return _layout_rows()
+		"icons":
+			return _icon_list_rows()
+		"icon_actions":
+			return _icon_action_rows()
+		"menu_orient":
+			return _menu_orient_rows()
+	return TREE[node_id]["rows"]
+
+func _title_for(node_id: String) -> String:
+	match node_id:
+		"layout":
+			var shape: String = "PORTRAIT" if layout.current_orient() == 1 else "LANDSCAPE"
+			return " 🎮 CONTROLLER LAYOUT (%s) " % shape
+		"icons":
+			return " ROTATE / FLIP BUTTON ICONS "
+		"icon_actions":
+			return " %s ICON " % layout.button_name(ctx_button)
+		"menu_orient":
+			return " ROTATE / FLIP MENU "
+	return TREE[node_id]["title"]
+
+func _layout_rows() -> Array:
+	var orient: int = layout.current_orient()
+	return [
+		{"label": "ROTATE / FLIP BUTTON ICONS", "kind": "go", "target": "icons"},
+		{"label": "ROTATE / FLIP MENU  [%s]" % layout.menu_state_text(), "kind": "go", "target": "menu_orient"},
+		{"label": "FLIP SCREEN  [%s]" % ("ON" if layout.is_screen_flipped(orient) else "OFF"), "kind": "flip_screen"},
+		{"label": "REPOSITION BUTTONS", "kind": "reposition"},
+		{"label": "SCREEN ORIENTATION  [%s]" % layout.ORIENT_MODE_NAMES[layout.orient_mode], "kind": "orient_mode"},
+		{"label": "[ RESET LAYOUT TO DEFAULT ]", "kind": "reset_layout"},
+	]
+
+func _icon_list_rows() -> Array:
+	var orient: int = layout.current_orient()
+	var rows: Array = []
+	for id in layout.ALL_IDS:
+		rows.append({"label": "%s  [%s]" % [layout.button_name(id), layout.icon_state_text(orient, id)],
+				"kind": "icon_go", "button": id})
+	return rows
+
+func _icon_action_rows() -> Array:
+	var orient: int = layout.current_orient()
+	return [
+		{"label": "FLIP ICON  [%s]" % ("ON" if layout.icon_flipped(orient, ctx_button) else "OFF"), "kind": "icon_flip"},
+		{"label": "ROTATE ICON 90°  [%d°]" % layout.icon_rotation(orient, ctx_button), "kind": "icon_rotate"},
+	]
+
+func _menu_orient_rows() -> Array:
+	return [
+		{"label": "FLIP MENU  [%s]" % ("ON" if layout.menu_flip else "OFF"), "kind": "menu_flip"},
+		{"label": "ROTATE MENU 90°  [%d°]" % (layout.menu_rot * 90), "kind": "menu_rotate"},
+	]
 
 
 # =========================================================================
@@ -510,6 +413,8 @@ func redraw() -> void:
 			_draw_channels()
 		Mode.TWEAK:
 			_draw_tweak()
+		Mode.REPOSITION:
+			_draw_reposition()
 
 func _add_label(text: String, color: Color) -> void:
 	var lbl := Label.new()
@@ -526,11 +431,10 @@ func _add_swatch(c: Color) -> void:
 
 func _draw_list() -> void:
 	var node_id: String = node_stack.back()
-	var node: Dictionary = TREE[node_id]
-	_add_label(node["title"], Color.RED)
+	_add_label(_title_for(node_id), Color.RED)
 
-	var rows: Array = node["rows"]
-	var cursor: int = int(cursors.get(node_id, 0))
+	var rows: Array = _rows_for(node_id)
+	var cursor: int = clampi(int(cursors.get(node_id, 0)), 0, rows.size() - 1)
 	var start: int = main._window_start(rows.size(), cursor)
 	var stop: int = mini(start + main.MENU_PAGE_ROWS, rows.size())
 	var scrolling: bool = rows.size() > main.MENU_PAGE_ROWS
@@ -538,16 +442,19 @@ func _draw_list() -> void:
 	if scrolling: main._add_scroll_hint(start > 0, "▲")
 	for i in range(start, stop):
 		var row: Dictionary = rows[i]
-		var is_action: bool = row["kind"] == "action"
-		var hl: Color = Color.WHITE if is_action else Color.YELLOW
-		var dim: Color = Color.LIGHT_GOLDENROD if is_action else Color.DARK_GRAY
-		var text: String = row["label"]
-		if row["kind"] == "choice":
-			var chosen: bool = (int(settings["orientation"]) == int(row["orientation"])
-					and int(settings[row["setting"]]) == int(row["value"]))
-			text = ("● " if chosen else "○ ") + text
-		main._add_menu_row(text, i == cursor, hl, dim)
+		var gold: bool = row["kind"] == "action" or row["kind"] == "reset_layout"
+		var hl: Color = Color.WHITE if gold else Color.YELLOW
+		var dim: Color = Color.LIGHT_GOLDENROD if gold else Color.DARK_GRAY
+		main._add_menu_row(row["label"], i == cursor, hl, dim)
 	if scrolling: main._add_scroll_hint(stop < rows.size(), "▼")
+	if node_id == "icon_actions" or node_id == "menu_orient":
+		_add_label(" PRESS A TO APPLY ", Color.DIM_GRAY)
+
+func _draw_reposition() -> void:
+	_add_label(" ✥ REPOSITION BUTTONS ", Color.CYAN)
+	_add_label(" PRESS AND HOLD TO DRAG ", Color.WHITE)
+	_add_label(" TAP A TO ACCEPT LAYOUT ", Color.LIME_GREEN)
+	_add_label(" TAP B TO CANCEL CHANGES ", Color.TOMATO)
 
 func _draw_channels() -> void:
 	var def: Dictionary = COLOR_DEFS[active_key]

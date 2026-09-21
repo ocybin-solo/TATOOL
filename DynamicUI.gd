@@ -70,8 +70,58 @@ var btn_channel: Button
 
 func _ready() -> void:
 	setup_ui_layout()
+	_setup_hold_repeat()
 	# Deferred so MainManager has finished building the trench buttons and menu helpers first
 	call_deferred("_boot_options_menu")
+
+# =========================================================================
+# HOLD TO REPEAT (D-pad left / right)
+# A tap fires at once (these buttons now act when pressed, not when released). Holding past a short delay then
+# repeats, so a value can be stepped without tapping over and over.
+# To add repeat to another button, add one _make_repeating() line in _setup_hold_repeat().
+# =========================================================================
+const REPEAT_DELAY_MSEC: int = 400    # how long to hold before repeating starts
+const REPEAT_INTERVAL_MSEC: int = 90  # time between repeats once it has started
+
+var _repeat_button: BaseButton = null
+var _repeat_handler: Callable = Callable()
+var _repeat_next_msec: int = 0
+
+func _setup_hold_repeat() -> void:
+	set_process(false)
+	_make_repeating(btn_channel_prev, _on_dpad_left)
+	_make_repeating(btn_channel_next, _on_dpad_right)
+
+func _make_repeating(btn: BaseButton, handler: Callable) -> void:
+	btn.action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS # the existing pressed connection now fires on press
+	btn.button_down.connect(_start_repeat.bind(btn, handler))
+	btn.button_up.connect(_stop_repeat)
+
+func _start_repeat(btn: BaseButton, handler: Callable) -> void:
+	_repeat_button = btn
+	_repeat_handler = handler
+	_repeat_next_msec = Time.get_ticks_msec() + REPEAT_DELAY_MSEC
+	set_process(true)
+
+func _stop_repeat() -> void:
+	_repeat_button = null
+	_repeat_handler = Callable()
+	set_process(false)
+
+func _process(_delta: float) -> void:
+	if _repeat_button == null or not is_instance_valid(_repeat_button):
+		_stop_repeat()
+		return
+	# button_up is not sent if the button loses focus mid-hold, so also make sure it is still held down
+	var draw_mode: int = _repeat_button.get_draw_mode()
+	if draw_mode != BaseButton.DRAW_PRESSED and draw_mode != BaseButton.DRAW_HOVER_PRESSED:
+		_stop_repeat()
+		return
+	var now: int = Time.get_ticks_msec()
+	if now >= _repeat_next_msec:
+		_repeat_next_msec = now + REPEAT_INTERVAL_MSEC
+		_repeat_handler.call()
+
 
 func _boot_options_menu() -> void:
 	var main_manager = get_tree().get_first_node_in_group("main_manager")
@@ -94,7 +144,7 @@ func setup_ui_layout() -> void:
 
 	# A Button (✔ ACCEPT)
 	btn_channel = Button.new()
-	btn_channel.text = "▢"
+	btn_channel.text = "🟢"
 	btn_channel.custom_minimum_size = Vector2(96, 96)
 	btn_channel.add_theme_font_size_override("font_size", 36)
 	btn_channel.add_theme_color_override("font_color", Color.GREEN)
@@ -108,7 +158,7 @@ func setup_ui_layout() -> void:
 
 	# B Button (❌ BACK)
 	btn_sens_left = Button.new()
-	btn_sens_left.text = "▢"
+	btn_sens_left.text = "🔴"
 	btn_sens_left.custom_minimum_size = Vector2(96, 96)
 	btn_sens_left.add_theme_font_size_override("font_size", 36)
 	btn_sens_left.add_theme_color_override("font_color", Color.RED)
@@ -315,6 +365,15 @@ func _on_action_button_b() -> void:
 # FUNCTION END: _on_action_button_b
 
 
+## Tier 1 > RESET ALL PARAMETERS: turn off every formula in Pass 2 and Pass 3 (back to clear-glass bypass) and
+## forget their values, so anything added later starts from its defaults. Pass 1's pattern is left alone.
+func _reset_effect_passes(main_manager) -> void:
+	for p in [1, 2]:
+		main_manager.pass_stack[p].clear()
+		main_manager.pass_values[p].clear() # cleared in place so any link to it stays valid
+		main_manager.rebuild_pass(p)
+	main_manager.redraw_select_pass_menu() # the pass list now shows Pass 2 and Pass 3 as [BYPASS]
+
 func _on_action_button_a() -> void:
 	var main_manager = get_tree().get_first_node_in_group("main_manager")
 	if not main_manager: return
@@ -338,6 +397,10 @@ func _on_action_button_a() -> void:
 				3: get_tree().quit()
 
 		ControlState.TIER_1_PASS:
+			# The last row is RESET ALL PARAMETERS: it clears the effect passes instead of opening a pass
+			if last_tier1_index == main_manager.PASS_LABELS.size() - 1:
+				_reset_effect_passes(main_manager)
+				return
 			print("🎮 Hierarchy Push: TIER_1_PASS -> TIER_2_FORMULA")
 			active_state = ControlState.TIER_2_FORMULA
 			main_manager.close_select_pass_menu(true) # locks in last_tier1_index as the active pass
