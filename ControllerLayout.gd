@@ -208,7 +208,7 @@ func _apply_orient_mode() -> void:
 	# When the window changes shape, _on_window_resized() re-fits everything
 
 func _on_window_resized() -> void:
-	if owner_menu != null and owner_menu.presets != null and owner_menu.presets.typing:
+	if owner_menu != null and ((owner_menu.presets != null and owner_menu.presets.typing) or (owner_menu.lab != null and owner_menu.lab.typing)):
 		return # the on-screen keyboard can resize the window; re-check once typing ends
 	if editing:
 		edit_cancel() # the window changed shape mid-edit: put the layout back and leave edit mode

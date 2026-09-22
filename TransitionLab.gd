@@ -28,8 +28,10 @@ extends Node
 const TIMES: Array = [5.0, 10.0, 20.0]
 const HOLD_FRACTION: float = 0.08 # share of the transition spent holding the peak (covers the snap hitch)
 const SENS_DEFAULT_INDEX: int = 2
+const SCREENSAVER_DIR: String = "user://screensaver_presets"
+const NAME_MAX_LENGTH: int = 24
 
-enum M { FORMULAS, UNIFORMS, CHANNELS, TWEAK }
+enum M { FORMULAS, UNIFORMS, CHANNELS, TWEAK, LOAD_LIST }
 
 var main
 var owner_menu
@@ -74,6 +76,13 @@ var _channel_idx: int = 0
 var _tweak_row: int = 0
 var _sens_idx: int = SENS_DEFAULT_INDEX
 var _sens_memory: Dictionary = {}
+
+# Saving a transition preset (A button, menus closed) and browsing saved ones (from the formula list)
+var saving: bool = false
+var typing: bool = false # true while the name field has focus (mirrors PresetsMenu.typing)
+var _name_edit = null
+var _load_entries: Array = []
+var _load_cursor: int = 0
 
 var _re_uniform: RegEx
 
@@ -132,6 +141,9 @@ func toggle_dev_mode() -> void:
 	else:
 		if running:
 			_finish()
+		if saving:
+			_end_typing()
+			_close_save_session()
 		if menu_open:
 			_close_menu()
 		if main.btn_select_pass.pressed.is_connected(_on_opt_pressed):
@@ -193,7 +205,10 @@ func dev_input(action: String) -> bool:
 			if running:
 				_abort()
 		"a":
-			_say("SAVING COMES IN THE NEXT UPDATE")
+			if active.is_empty():
+				_say("ADD A FORMULA FIRST (PRESS OPT)")
+			else:
+				_open_save()
 	return true
 
 func _cycle_time(step: int) -> void:
@@ -476,6 +491,8 @@ func _set_comp(value: Variant, type: String, idx: int, v: float) -> Variant:
 # THE LAB MENU (OPT while developer mode is on): formulas > uniforms > (channels) > tweak
 # =========================================================================
 func _on_opt_pressed() -> void:
+	if saving:
+		return
 	var cp = main.control_panel
 	if menu_active():
 		_close_menu()
@@ -488,7 +505,7 @@ func _on_opt_pressed() -> void:
 	_open_menu()
 
 func menu_active() -> bool:
-	return menu_open and is_instance_valid(_panel_ref) and main.menu_overlay_panel == _panel_ref
+	return (menu_open or saving) and is_instance_valid(_panel_ref) and main.menu_overlay_panel == _panel_ref
 
 func _open_menu() -> void:
 	menu_open = true
@@ -511,6 +528,165 @@ func _close_menu() -> void:
 	main.menu_center_host.visible = false
 	_update_indicator()
 
+
+## A -> opens the save screen. B or a successful save closes it, same as an OPT submenu closing (no outer
+## main menu to return to, since this was reached directly from the hidden/idle developer-mode screen).
+func _open_save() -> void:
+	saving = true
+	var cp = main.control_panel
+	cp.active_state = cp.ControlState.SYSTEM_MENU
+	main._ensure_cyan_panel()
+	_panel_ref = main.menu_overlay_panel
+	redraw()
+
+func _close_save_session() -> void:
+	saving = false
+	_panel_ref = null
+	var cp = main.control_panel
+	cp.active_state = cp.ControlState.HIDDEN
+	if is_instance_valid(main.menu_overlay_panel):
+		main.menu_overlay_panel.queue_free()
+		main.menu_overlay_panel = null
+	main.menu_center_host.visible = false
+	_update_indicator()
+
+func _on_typing_started() -> void:
+	typing = true
+
+func _on_typing_stopped() -> void:
+	_end_typing()
+
+func _end_typing() -> void:
+	if is_instance_valid(_name_edit):
+		_name_edit.release_focus()
+	_name_edit = null
+	var was_typing: bool = typing
+	typing = false
+	if was_typing and owner_menu != null:
+		owner_menu.notify_typing_done() # the keyboard may have resized the window; re-check the layout
+
+func _scan_names() -> Array:
+	var out: Array = []
+	for e in _scan_transition_presets():
+		out.append(String(e["name"]))
+	return out
+
+func _default_name() -> String:
+	var highest: int = 0
+	for n in _scan_names():
+		if n.begins_with("TRANSITION "):
+			var tail: String = n.substr(11)
+			if tail.is_valid_int():
+				highest = maxi(highest, int(tail))
+	return "TRANSITION %03d" % (highest + 1)
+
+## Two saved transitions never share a name: the second becomes "NAME (2)", and so on.
+func _unique_name(wanted: String) -> String:
+	var taken: Array = _scan_names()
+	if not taken.has(wanted):
+		return wanted
+	var n: int = 2
+	while taken.has("%s (%d)" % [wanted, n]):
+		n += 1
+	return "%s (%d)" % [wanted, n]
+
+func _new_path() -> String:
+	var dt: Dictionary = Time.get_datetime_dict_from_system()
+	var base: String = "transition_%04d%02d%02d_%02d%02d%02d" % [dt["year"], dt["month"], dt["day"], dt["hour"], dt["minute"], dt["second"]]
+	var path: String = "%s/%s.cfg" % [SCREENSAVER_DIR, base]
+	var n: int = 2
+	while FileAccess.file_exists(path):
+		path = "%s/%s_%d.cfg" % [SCREENSAVER_DIR, base, n]
+		n += 1
+	return path
+
+## Stores which formulas are active, in order, every one of their uniform values (the peaks for
+## animated ones), and the duration you were testing at.
+func _save_current(raw_name: String) -> void:
+	var preset_name: String = raw_name.strip_edges().left(NAME_MAX_LENGTH)
+	if preset_name == "":
+		preset_name = _default_name()
+	preset_name = _unique_name(preset_name)
+
+	var cfg := ConfigFile.new()
+	cfg.set_value("preset", "version", 1)
+	cfg.set_value("preset", "name", preset_name)
+	cfg.set_value("preset", "created", Time.get_datetime_string_from_system())
+	cfg.set_value("preset", "duration_sec", float(TIMES[time_idx]))
+	cfg.set_value("effect", "stack", active.duplicate())
+	for rec in _records:
+		cfg.set_value("effect", rec["name"], peak_values[rec["name"]])
+
+	DirAccess.make_dir_recursive_absolute(SCREENSAVER_DIR)
+	var err: int = cfg.save(_new_path())
+	_end_typing()
+	_close_save_session()
+	_say(("SAVED: %s" % preset_name) if err == OK else "COULD NOT SAVE (ERROR %d)" % err)
+
+func _scan_transition_presets() -> Array:
+	var out: Array = []
+	if not DirAccess.dir_exists_absolute(SCREENSAVER_DIR):
+		return out
+	for f in DirAccess.get_files_at(SCREENSAVER_DIR):
+		if not f.ends_with(".cfg"):
+			continue
+		var path: String = "%s/%s" % [SCREENSAVER_DIR, f]
+		var cfg := ConfigFile.new()
+		if cfg.load(path) != OK or not cfg.has_section("preset"):
+			continue
+		out.append({"file": path, "name": str(cfg.get_value("preset", "name", f.get_basename())),
+				"created": str(cfg.get_value("preset", "created", ""))})
+	out.sort_custom(func(a, b): return a["created"] > b["created"])
+	return out
+
+func _open_load_list() -> void:
+	_load_entries = _scan_transition_presets()
+	_load_cursor = 0
+	mode = M.LOAD_LIST
+
+## Unknown formulas are skipped, and every value is clamped to its uniform's range, so an older
+## transition preset keeps working if a formula's tags change later.
+func _load_transition_preset(entry: Dictionary) -> void:
+	var cfg := ConfigFile.new()
+	if cfg.load(entry["file"]) != OK:
+		_say("COULD NOT READ THAT FILE")
+		return
+	var stack = cfg.get_value("effect", "stack", [])
+	var ids: Array = []
+	if stack is Array:
+		for id in stack:
+			if formulas.has(id) and not ids.has(id):
+				ids.append(id)
+	active = ids
+	peak_values.clear()
+	if cfg.has_section("effect"):
+		for key in cfg.get_section_keys("effect"):
+			if key != "stack":
+				peak_values[key] = cfg.get_value("effect", key)
+
+	var duration: float = float(cfg.get_value("preset", "duration_sec", TIMES[time_idx]))
+	var best_idx: int = time_idx
+	var best_diff: float = INF
+	for i in range(TIMES.size()):
+		var d: float = absf(float(TIMES[i]) - duration)
+		if d < best_diff:
+			best_diff = d
+			best_idx = i
+	time_idx = best_idx
+
+	_rebuild_effect() # fills in defaults for any uniform the file didn't have
+	for rec in _records:
+		var v: Variant = peak_values[rec["name"]]
+		if rec["type"] == "float":
+			peak_values[rec["name"]] = clampf(float(v), rec["min"], rec["max"])
+		else:
+			for c in range(rec["channels"].size()):
+				v = _set_comp(v, rec["type"], c, clampf(_get_comp(v, rec["type"], c), rec["min"], rec["max"]))
+			peak_values[rec["name"]] = v
+	_apply_rest_values()
+	_say("LOADED: %s" % String(entry["name"]))
+
+
 func _formula_ids() -> Array:
 	return formulas.keys()
 
@@ -522,19 +698,24 @@ func _uniforms_of(id: String) -> Array:
 	return out
 
 func handle_vertical(step: int) -> void:
+	if saving:
+		return
 	match mode:
 		M.FORMULAS:
-			_cursor_formula = posmod(_cursor_formula + step, _formula_ids().size() + 1)
+			_cursor_formula = posmod(_cursor_formula + step, _formula_ids().size() + 2)
 		M.UNIFORMS:
 			_cursor_uniform = posmod(_cursor_uniform + step, _uniforms_of(_formula_id).size() + 1)
 		M.CHANNELS:
 			_channel_idx = posmod(_channel_idx + step, _uniforms_of(_formula_id)[_uniform_idx]["channels"].size())
 		M.TWEAK:
 			_tweak_row = posmod(_tweak_row + step, 2)
+		M.LOAD_LIST:
+			if not _load_entries.is_empty():
+				_load_cursor = posmod(_load_cursor + step, _load_entries.size())
 	redraw()
 
 func handle_horizontal(step: int) -> void:
-	if mode != M.TWEAK:
+	if saving or mode != M.TWEAK:
 		return
 	var rec: Dictionary = _uniforms_of(_formula_id)[_uniform_idx]
 	var ladder: Array = _ladder(rec)
@@ -551,10 +732,16 @@ func handle_horizontal(step: int) -> void:
 	redraw()
 
 func handle_a() -> void:
+	if saving:
+		_save_current(_name_edit.text if is_instance_valid(_name_edit) else "")
+		return
 	match mode:
 		M.FORMULAS:
 			var ids: Array = _formula_ids()
 			if _cursor_formula == ids.size():
+				# [ LOAD TRANSITION PRESET ]
+				_open_load_list()
+			elif _cursor_formula == ids.size() + 1:
 				# [ REMOVE ALL FORMULAS ]
 				active.clear()
 				peak_values.clear()
@@ -586,6 +773,11 @@ func handle_a() -> void:
 			_enter_tweak(_uniforms_of(_formula_id)[_uniform_idx])
 		M.TWEAK:
 			return
+		M.LOAD_LIST:
+			if not _load_entries.is_empty():
+				_load_transition_preset(_load_entries[_load_cursor])
+				mode = M.FORMULAS
+				_cursor_formula = 0
 	redraw()
 
 func _enter_tweak(rec: Dictionary) -> void:
@@ -595,6 +787,10 @@ func _enter_tweak(rec: Dictionary) -> void:
 
 ## Returns true when the lab menu is closed (nothing for the caller to redraw: it closes itself).
 func handle_b() -> bool:
+	if saving:
+		_end_typing()
+		_close_save_session()
+		return false
 	match mode:
 		M.TWEAK:
 			var rec: Dictionary = _uniforms_of(_formula_id)[_uniform_idx]
@@ -602,6 +798,8 @@ func handle_b() -> bool:
 		M.CHANNELS:
 			mode = M.UNIFORMS
 		M.UNIFORMS:
+			mode = M.FORMULAS
+		M.LOAD_LIST:
 			mode = M.FORMULAS
 		M.FORMULAS:
 			_close_menu()
@@ -622,6 +820,10 @@ func redraw() -> void:
 		return
 	for child in main.menu_list_box.get_children():
 		child.queue_free()
+	_name_edit = null
+	if saving:
+		_draw_save()
+		return
 	match mode:
 		M.FORMULAS:
 			_draw_formulas()
@@ -631,6 +833,8 @@ func redraw() -> void:
 			_draw_channels()
 		M.TWEAK:
 			_draw_tweak()
+		M.LOAD_LIST:
+			_draw_load_list()
 
 func _add_label(text: String, color: Color) -> void:
 	var lbl := Label.new()
@@ -639,13 +843,13 @@ func _add_label(text: String, color: Color) -> void:
 	lbl.add_theme_color_override("font_color", color)
 	main.menu_list_box.add_child(lbl)
 
-func _draw_window(rows: Array, cursor: int, gold_row: int) -> void:
+func _draw_window(rows: Array, cursor: int, gold_rows: Array) -> void:
 	var start: int = main._window_start(rows.size(), cursor)
 	var stop: int = mini(start + main.MENU_PAGE_ROWS, rows.size())
 	var scrolling: bool = rows.size() > main.MENU_PAGE_ROWS
 	if scrolling: main._add_scroll_hint(start > 0, "▲")
 	for i in range(start, stop):
-		var gold: bool = i == gold_row
+		var gold: bool = gold_rows.has(i)
 		main._add_menu_row(rows[i], i == cursor, Color.WHITE if gold else Color.YELLOW, Color.LIGHT_GOLDENROD if gold else Color.DARK_GRAY)
 	if scrolling: main._add_scroll_hint(stop < rows.size(), "▼")
 
@@ -654,8 +858,9 @@ func _draw_formulas() -> void:
 	var rows: Array = []
 	for id in _formula_ids():
 		rows.append(("● " if active.has(id) else "○ ") + String(formulas[id]["name"]))
+	rows.append("[ LOAD TRANSITION PRESET ]")
 	rows.append("[ REMOVE ALL FORMULAS ]")
-	_draw_window(rows, _cursor_formula, rows.size() - 1) # the last row removes everything
+	_draw_window(rows, _cursor_formula, [rows.size() - 2, rows.size() - 1])
 
 func _draw_uniforms() -> void:
 	_add_label(" 🌀 %s " % String(formulas[_formula_id]["name"]), Color.CYAN)
@@ -667,7 +872,7 @@ func _draw_uniforms() -> void:
 		if rec["animated"]:
 			shown += " ▲"
 		rows.append(shown)
-	_draw_window(rows, _cursor_uniform, 0) # row 0 removes the formula
+	_draw_window(rows, _cursor_uniform, [0]) # row 0 removes the formula
 	_add_label(" ▲ = MOVES DURING A TRANSITION ", Color.DIM_GRAY)
 
 func _draw_channels() -> void:
@@ -677,6 +882,35 @@ func _draw_channels() -> void:
 	var names: Array = rec["channels"]
 	for i in range(names.size()):
 		main._add_menu_row("%s   [ %s ]" % [names[i], main._fmt(_get_comp(current, rec["type"], i))], i == _channel_idx)
+
+func _draw_save() -> void:
+	_add_label(" 💾 SAVE TRANSITION PRESET ", Color.CHARTREUSE)
+	_add_label(" %d ACTIVE FORMULA(S)  ·  %d S " % [active.size(), int(TIMES[time_idx])], Color.DIM_GRAY)
+	_add_label(" NAME (TAP THE NAME TO CHANGE IT) ", Color.DIM_GRAY)
+
+	_name_edit = LineEdit.new()
+	_name_edit.text = _default_name()
+	_name_edit.max_length = NAME_MAX_LENGTH
+	_name_edit.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_name_edit.custom_minimum_size = Vector2(300, 52)
+	_name_edit.select_all_on_focus = true
+	_name_edit.text_submitted.connect(_save_current)
+	_name_edit.focus_entered.connect(_on_typing_started)
+	_name_edit.focus_exited.connect(_on_typing_stopped)
+	main.menu_list_box.add_child(_name_edit)
+
+	_add_label(" A OR KEYBOARD DONE = SAVE ", Color.YELLOW)
+	_add_label(" B = CANCEL ", Color.DARK_GRAY)
+
+func _draw_load_list() -> void:
+	_add_label(" 📂 LOAD TRANSITION PRESET ", Color.CYAN)
+	if _load_entries.is_empty():
+		_add_label("    [ NO SAVED TRANSITIONS YET ]    ", Color.DARK_GRAY)
+		return
+	var names: Array = []
+	for e in _load_entries:
+		names.append(String(e["name"]))
+	_draw_window(names, _load_cursor, [])
 
 func _draw_tweak() -> void:
 	var rec: Dictionary = _uniforms_of(_formula_id)[_uniform_idx]
@@ -721,6 +955,10 @@ func _register_formulas() -> void:
 	_add_formula("chroma", "CHROMA SPLIT", "color", SRC_CHROMA)
 	_add_formula("petals", "PETAL WARP", "warp", SRC_PETALS)
 	_add_formula("scanroll", "SCANLINE ROLL", "warp", SRC_SCANROLL)
+	_add_formula("invert", "COLOR INVERT", "color", SRC_INVERT)
+	_add_formula("huerotate", "HUE ROTATE", "color", SRC_HUEROTATE)
+	_add_formula("duotone", "DUOTONE OVERRIDE", "color", SRC_DUOTONE)
+	_add_formula("solarize", "SOLARIZE", "color", SRC_SOLARIZE)
 
 func _add_formula(id: String, display_name: String, kind: String, source: String) -> void:
 	formulas[id] = {"id": id, "name": display_name, "kind": kind, "source": source}
@@ -870,5 +1108,59 @@ uniform float u_speed = 6.0; // @label Roll Speed | @min 0 | @max 30 | @sens 0.5
 vec2 fx_scanroll(vec2 uv) {
 	float wobble = sin(uv.y * 60.0 + u_time * u_speed) * u_amount;
 	return vec2(uv.x + wobble * (1.0 - abs(uv.y - 0.5) * 2.0), uv.y);
+}
+"""
+
+const SRC_INVERT: String = """
+uniform float u_amount = 1.0; // @label Invert Amount | @min 0 | @max 1 | @sens 0.05 | @rest 0
+
+vec4 fx_invert(vec4 c, vec2 uv, sampler2D screen) {
+	return vec4(mix(c.rgb, vec3(1.0) - c.rgb, u_amount), c.a);
+}
+"""
+
+const SRC_HUEROTATE: String = """
+uniform float u_angle = 180.0; // @label Hue Rotation | @min -360 | @max 360 | @sens 5 | @rest 0
+
+vec3 huerot_rgb2hsv(vec3 c) {
+	vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+	vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+	vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+	float d = q.x - min(q.w, q.y);
+	float e = 1.0e-10;
+	return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
+}
+vec3 huerot_hsv2rgb(vec3 c) {
+	vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+	vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+	return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+}
+vec4 fx_huerotate(vec4 c, vec2 uv, sampler2D screen) {
+	vec3 hsv = huerot_rgb2hsv(c.rgb);
+	hsv.x = fract(hsv.x + u_angle / 360.0);
+	return vec4(huerot_hsv2rgb(hsv), c.a);
+}
+"""
+
+const SRC_DUOTONE: String = """
+uniform float u_amount = 1.0; // @label Duotone Amount | @min 0 | @max 1 | @sens 0.05 | @rest 0
+uniform vec4 u_shadow_color : source_color = vec4(0.05, 0.0, 0.15, 1.0); // @label Shadow Color | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_highlight_color : source_color = vec4(1.0, 0.8, 0.2, 1.0); // @label Highlight Color | @min 0 | @max 1 | @sens 0.02
+
+vec4 fx_duotone(vec4 c, vec2 uv, sampler2D screen) {
+	float lum = dot(c.rgb, vec3(0.299, 0.587, 0.114));
+	vec3 toned = mix(u_shadow_color.rgb, u_highlight_color.rgb, lum);
+	return vec4(mix(c.rgb, toned, u_amount), c.a);
+}
+"""
+
+const SRC_SOLARIZE: String = """
+uniform float u_amount = 1.0; // @label Solarize Amount | @min 0 | @max 1 | @sens 0.05 | @rest 0
+
+vec4 fx_solarize(vec4 c, vec2 uv, sampler2D screen) {
+	float threshold = mix(1.0, 0.35, u_amount);
+	float m = max(max(c.r, c.g), c.b);
+	vec3 solarized = mix(c.rgb, vec3(1.0) - c.rgb, step(threshold, m));
+	return vec4(mix(c.rgb, solarized, u_amount), c.a);
 }
 """
