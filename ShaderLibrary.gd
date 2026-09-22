@@ -430,7 +430,9 @@ func _register_builtin_recipes() -> void:
 	_register("droste_spiral", PASS_WARP, "DROSTE INFINITE SPIRAL", SRC_DROSTE_SPIRAL, true) 
 	_register("polar_kaleidoscope", PASS_WARP, "POLAR KALEIDOSCOPE", SRC_POLAR_KALEIDOSCOPE, true)
 	_register("field_shift", PASS_WARP, "VECTOR FIELD MELT", SRC_FIELD_SHIFT, true)
-	_register("fisheye_bulb", PASS_WARP, "FISHEYE BULB LENS", SRC_FISHEYE_BULB, true)
+	_register("FISHEYE", PASS_WARP, "FISHEYE", SRC_FISHEYE, true)
+	_register("mirror_tile", PASS_WARP, "MIRROR TILE GRID", SRC_MIRROR_TILE, true)
+	_register("folding_kaleidoscope", PASS_WARP, "FOLDING KALEIDOSCOPE", SRC_FOLDING_KALEIDOSCOPE, true) 
 	
 	
 	#########  Pass 3 ###########   - filters
@@ -444,6 +446,155 @@ func _register_builtin_recipes() -> void:
 	_register("ascii_art", PASS_FILTER, "📟 ASCII CHARACTER TERMINAL", SRC_ASCII_ART, false)
 	_register("oil_painting", PASS_FILTER, "🖌️ OIL PAINTING CANVAS", SRC_OIL_PAINTING, false)
 	_register("neon_blur", PASS_FILTER, "🔮 NEON GLOW BLUR", SRC_NEON_BLUR, false)
+	_register("fxaa_filter", PASS_FILTER, "✨ FXAA ANTI-ALIASING LENS", SRC_FXAA_FILTER, false)
+
+
+const SRC_FOLDING_KALEIDOSCOPE: String = """
+uniform int u_fold_iterations = 4; // @label Fold Iterations | @min 1 | @max 8 | @sens 1
+uniform float u_fold_angle = 1.047; // @label Mirror Angle (Radians) | @min 0.0 | @max 3.1416 | @sens 0.02
+uniform float u_fold_scale = 1.2; // @label Fold Spatial Scaling | @min 0.5 | @max 2.5 | @sens 0.05
+uniform vec2 u_fold_shift = vec2(0.3, 0.3); // @label Fold Translation | @min -1.0 | @max 1.0 | @sens 0.01
+
+vec2 fx_folding_kaleidoscope(vec2 uv) {
+	// Center coordinates around (0.0, 0.0)
+	vec2 p = uv - 0.5;
+	
+	// Create a mathematical fold mirror vector line based on the user's angle
+	vec2 mirror_normal = vec2(cos(u_fold_angle), sin(u_fold_angle));
+	
+	// RECURSIVE SPACE-FOLDING MATRIX LOOP
+	for (int i = 0; i < u_fold_iterations; i++) {
+		// 1. Plane Fold: Enforce absolute symmetry on the axes
+		p = abs(p);
+		
+		// 2. Vector Fold: If space crosses the angled mirror plane, reflect it backward
+		float distance_to_plane = dot(p, mirror_normal);
+		if (distance_to_plane > 0.0) {
+			p -= 2.0 * distance_to_plane * mirror_normal;
+		}
+		
+		// 3. Scale and Translate: Stretch and offset space before the next fold layer hits
+		p *= u_fold_scale;
+		p -= u_fold_shift;
+	}
+	
+	// Realign back to clean texture coordinate tracking boundaries (0.0 to 1.0)
+	return fract(p + 0.5);
+}
+"""
+
+
+const SRC_MIRROR_TILE: String = """
+uniform vec2 u_tile_frequency = vec2(3.0, 3.0); // @label Tile Density | @min 1.0 | @max 12.0 | @sens 0.1
+uniform vec2 u_tile_scroll = vec2(0.0, 0.0); // @label Tile Scroll Offset | @min -1.0 | @max 1.0 | @sens 0.01
+uniform float u_mirror_angle = 0.0; // @label Tile Grid Tilt | @min -3.1416 | @max 3.1416 | @sens 0.05
+
+// Helper: 2D Grid Rotation Matrix
+vec2 tile_rot2(vec2 p, float angle) {
+	float s = sin(angle); float c = cos(angle);
+	return vec2(p.x * c - p.y * s, p.x * s + p.y * c);
+}
+
+vec2 fx_mirror_tile(vec2 uv) {
+	// Center coordinates and apply optional rotation tilt to the grid lines
+	vec2 p = uv - 0.5;
+	p = tile_rot2(p, u_mirror_angle);
+	
+	// Apply tile grid scaling frequency and user scroll offsets
+	vec2 scaled_p = (p + 0.5) * u_tile_frequency + u_tile_scroll + (u_time * 0.05);
+	
+	// Determine the coordinate indices of the current tile box block
+	vec2 tile_index = floor(scaled_p);
+	
+	// Extract the local coordinates inside the individual tile block (0.0 to 1.0)
+	vec2 local_uv = fract(scaled_p);
+	
+	// MAGIC MIRROR MATH: Check if the grid block column or row index is an odd number.
+	// If a cell index is odd, invert its local UV layout. This forces adjacent 
+	// boxes to reflect back and forth into each other perfectly at the borders!
+	if (mod(tile_index.x, 2.0) == 1.0) {
+		local_uv.x = 1.0 - local_uv.x;
+	}
+	if (mod(tile_index.y, 2.0) == 1.0) {
+		local_uv.y = 1.0 - local_uv.y;
+	}
+	
+	// Realight the coordinate tracking back to normal canvas spaces
+	return local_uv;
+}
+"""
+
+
+const SRC_FXAA_FILTER: String = """
+uniform float u_fxaa_span_max = 8.0; // @label Blur Maximum Span | @min 2.0 | @max 16.0 | @sens 1.0
+uniform float u_fxaa_reducer = 128.0; // @label Edge Sharpness Cutoff | @min 32.0 | @max 256.0 | @sens 4.0
+
+vec4 fx_fxaa_filter(vec2 uv) {
+	// Query screen pixel step sizes
+	vec2 r_size = vec2(textureSize(u_warped_texture, 0));
+	vec2 texel_step = 1.0 / r_size;
+	
+	// Sample the core pixel and its 4 immediate cross neighbors
+	vec3 rgbNW = texture(u_warped_texture, uv + vec2(-1.0, -1.0) * texel_step).rgb;
+	vec3 rgbNE = texture(u_warped_texture, uv + vec2(1.0, -1.0) * texel_step).rgb;
+	vec3 rgbSW = texture(u_warped_texture, uv + vec2(-1.0, 1.0) * texel_step).rgb;
+	vec3 rgbSE = texture(u_warped_texture, uv + vec2(1.0, 1.0) * texel_step).rgb;
+	vec3 rgbM  = texture(u_warped_texture, uv).rgb;
+	
+	// Convert channels to luminance weights to evaluate edge contrast gradients
+	vec3 luma = vec3(0.299, 0.587, 0.114);
+	float lumaNW = dot(rgbNW, luma);
+	float lumaNE = dot(rgbNE, luma);
+	float lumaSW = dot(rgbSW, luma);
+	float lumaSE = dot(rgbSE, luma);
+	float lumaM  = dot(rgbM,  luma);
+	
+	// Detect contrast bounds
+	float lumaMin = min(lumaM, min(min(lumaNW, lumaNE), min(lumaSW, lumaSE)));
+	float lumaMax = max(lumaM, max(max(lumaNW, lumaNE), max(lumaSW, lumaSE)));
+	
+	// Calculate edge direction vector forces
+	vec2 dir;
+	dir.x = -((lumaNW + lumaNE) - (lumaSW + lumaSE));
+	dir.y =  ((lumaNW + lumaSW) - (lumaNE + lumaSE));
+	
+	float dirReduce = max((lumaNW + lumaSW + lumaNE + lumaSE) * (0.25 * 0.03125), 1.0 / u_fxaa_reducer);
+	float rcpDirMin = 1.0 / (min(abs(dir.x), abs(dir.y)) + dirReduce);
+	
+	dir = min(vec2(u_fxaa_span_max), max(vec2(-u_fxaa_span_max), dir * rcpDirMin)) * texel_step;
+	
+	// Gather directional anti-aliasing pixel weights blends
+	vec3 rgbA = 0.5 * (
+		texture(u_warped_texture, uv + dir * (1.0 / 3.0 - 0.5)).rgb +
+		texture(u_warped_texture, uv + dir * (2.0 / 3.0 - 0.5)).rgb);
+		
+	vec3 rgbB = rgbA * 0.5 + 0.25 * (
+		texture(u_warped_texture, uv + dir * -0.5).rgb +
+		texture(u_warped_texture, uv + dir * 0.5).rgb);
+		
+	float lumaB = dot(rgbB, luma);
+	
+	// If the sub-pixel directional blur goes out of our luminance contrast window, fallback to tighter blend
+	if ((lumaB < lumaMin) || (lumaB > lumaMax)) {
+		return vec4(rgbA, 1.0);
+	}
+	
+	return vec4(rgbB, 1.0);
+}
+"""
+
+
+const SRC_FISHEYE: String = """
+uniform float u_bulge = 2.5; // @label Bulge Strength | @min -0.4 | @max 6 | @sens 0.1 | @rest 0
+uniform vec2 u_center = vec2(0.5, 0.5); // @label Center | @min 0 | @max 1 | @sens 0.01
+
+vec2 fx_FISHEYE(vec2 uv) {
+	vec2 p = uv - u_center;
+	float r2 = dot(p, p);
+	return u_center + p * (1.0 + u_bulge * r2 * 4.0);
+}
+"""
+
 
 
 const SRC_HAIRY_INFINITY: String = """
@@ -1387,34 +1538,6 @@ vec4 fx_crt_screen(vec2 uv) {
 """
 
 
-const SRC_FISHEYE_BULB: String = """
-uniform vec2 u_lens_center = vec2(0.5, 0.5); // @label Bulb Center | @min 0.0 | @max 1.0 | @sens 0.01
-uniform float u_lens_radius = 0.5; // @label Bulb Radius | @min 0.1 | @max 1.5 | @sens 0.02
-uniform float u_lens_power = 1.5; // @label Pinch Intensity | @min 0.1 | @max 4.0 | @sens 0.05
-
-vec2 fx_fisheye_bulb(vec2 uv) {
-	// Calculate the distance vector from the pixel to the center of our bulb lens
-	vec2 p = uv - u_lens_center;
-	float d = length(p);
-	
-	// Check if the current pixel coordinate falls within our lens bubble radius
-	if (d < u_lens_radius) {
-		// Normalize the coordinate space relative to the radius of the bulb
-		float norm_d = d / u_lens_radius;
-		
-		// Run a non-linear exponential warp factor on the normalized radius
-		float warp = pow(norm_d, u_lens_power);
-		
-		// Rescale the vector from the center based on the magnification power curve
-		return u_lens_center + normalize(p) * warp * u_lens_radius;
-	}
-	
-	// If outside the lens boundary, leave the coordinate tracking flat and untouched
-	return uv;
-}
-"""
-
-
 const SRC_FIELD_SHIFT: String = """
 uniform vec2 u_field_frequency = vec2(4.0, 4.0); // @label Wave Density | @min 0.5 | @max 16.0 | @sens 0.1
 uniform float u_field_strength = 0.05; // @label Glass Thickness | @min 0.0 | @max 0.25 | @sens 0.005
@@ -2297,7 +2420,6 @@ vec4 fx_gyroid_cyber(vec2 uv) {
 }
 """
 
-
 const SRC_FBM_COSINE: String = """
 uniform vec2 u_warp_frequency = vec2(2.5, 2.5); // @label Warp Frequency | @min 0.1 | @max 12 | @sens 0.05
 uniform float u_warp_strength = 1.1; // @label Warp Strength | @min 0 | @max 4 | @sens 0.05
@@ -2305,10 +2427,18 @@ uniform float u_noise_detail = 4.0; // @label Noise Detail | @min 1 | @max 5 | @
 uniform float u_flow_speed = 0.4; // @label Flow Speed | @min 0 | @max 3 | @sens 0.05
 uniform float u_palette_frequency = 1.0; // @label Color Density | @min 0.2 | @max 5.0 | @sens 0.05
 
-uniform vec4 u_color_a : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label Wave Center | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_b : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label Wave Amplitude | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_c : source_color = vec4(1.0, 1.0, 1.0, 1.0); // @label Wave Frequency | @min 0 | @max 2 | @sens 0.02
-uniform vec4 u_color_d : source_color = vec4(0.0, 0.33, 0.67, 1.0); // @label Wave Phase | @min 0 | @max 1 | @sens 0.02
+// FOUR LITERAL CHANNELS FOR EXACT COLOR PLACEMENT
+uniform vec4 u_color_1 : source_color = vec4(0.02, 0.02, 0.05, 1.0); // @label Color Slot 1 (Base) | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_2 : source_color = vec4(0.12, 0.0, 0.22, 1.0); // @label Color Slot 2 (Mid-Low) | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_3 : source_color = vec4(0.0, 0.5, 0.5, 1.0); // @label Color Slot 3 (Mid-High) | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_4 : source_color = vec4(0.1, 0.7, 0.9, 1.0); // @label Color Slot 4 (Crest) | @min 0 | @max 1 | @sens 0.02
+
+// POSITION OVERRIDES TO REARRANGE WHERE CORES SHIFT
+uniform float u_base_clamp = 0.10; // @label Base Color Solid Field | @min 0.0 | @max 0.4 | @sens 0.01
+uniform float u_pos_split_1 = 0.30; // @label Position Slot 2 | @min 0.15 | @max 0.6 | @sens 0.01
+uniform float u_pos_split_2 = 0.55; // @label Position Slot 3 | @min 0.35 | @max 0.8 | @sens 0.01
+uniform float u_pos_split_3 = 0.80; // @label Position Slot 4 | @min 0.60 | @max 0.99 | @sens 0.01
+uniform float u_aa_feather = 0.02; // @label Edge Smoothness | @min 0.001 | @max 0.4 | @sens 0.01
 
 float fbm_hash2d(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
 float fbm_value_noise(vec2 p) {
@@ -2333,13 +2463,135 @@ vec4 fx_fbm_cosine(vec2 uv) {
 	vec2 r = vec2(fbm_octaves(st + u_warp_strength * q + vec2(1.7, 9.2) + vec2(scaled_time * 0.3)), fbm_octaves(st + u_warp_strength * q + vec2(8.3, 2.8) + vec2(scaled_time * 0.05)));
 	float final_field_math = fbm_octaves(st + u_warp_strength * r);
 	
-	// Drive the cyclical cosine phase using a mix of the field map and the structural stretch
-	float t = (final_field_math + length(q) * 0.3) * u_palette_frequency;
-	vec3 cos_color = u_color_a.rgb + u_color_b.rgb * cos(6.28318 * (u_color_c.rgb * t + u_color_d.rgb));
+	float t = fract((final_field_math + length(q) * 0.3) * u_palette_frequency);
 	
-	return vec4(cos_color, 1.0) * (final_field_math * 1.5 + 0.3);
+	// Smooth out blocky transitions using mathematical color mixing weights
+	float w0 = smoothstep(u_base_clamp - u_aa_feather, u_base_clamp + u_aa_feather, t);
+	float w1 = smoothstep(u_pos_split_1 - u_aa_feather, u_pos_split_1 + u_aa_feather, t);
+	float w2 = smoothstep(u_pos_split_2 - u_aa_feather, u_pos_split_2 + u_aa_feather, t);
+	float w3 = smoothstep(u_pos_split_3 - u_aa_feather, u_pos_split_3 + u_aa_feather, t);
+	
+	// Linearly chain the smooth layers together
+	vec3 ramp_color = mix(u_color_1.rgb, u_color_2.rgb, w0);
+	ramp_color = mix(ramp_color, u_color_3.rgb, w1);
+	ramp_color = mix(ramp_color, u_color_4.rgb, w2);
+	ramp_color = mix(ramp_color, u_color_1.rgb, w3); // Seamless looping bridge
+	
+	return vec4(ramp_color, 1.0) * (final_field_math * 1.5 + 0.3);
 }
 """
+
+
+
+#const SRC_FBM_COSINE: String = """
+#uniform vec2 u_warp_frequency = vec2(2.5, 2.5); // @label Warp Frequency | @min 0.1 | @max 12 | @sens 0.05
+#uniform float u_warp_strength = 1.1; // @label Warp Strength | @min 0 | @max 4 | @sens 0.05
+#uniform float u_noise_detail = 4.0; // @label Noise Detail | @min 1 | @max 5 | @sens 1
+#uniform float u_flow_speed = 0.4; // @label Flow Speed | @min 0 | @max 3 | @sens 0.05
+#uniform float u_palette_frequency = 1.0; // @label Color Density | @min 0.2 | @max 5.0 | @sens 0.05
+#
+#// FOUR LITERAL CHANNELS FOR EXACT COLOR PLACEMENT
+#uniform vec4 u_color_1 : source_color = vec4(0.02, 0.02, 0.05, 1.0); // @label Color Slot 1 (Base) | @min 0 | @max 1 | @sens 0.02
+#uniform vec4 u_color_2 : source_color = vec4(0.12, 0.0, 0.22, 1.0); // @label Color Slot 2 (Mid-Low) | @min 0 | @max 1 | @sens 0.02
+#uniform vec4 u_color_3 : source_color = vec4(0.0, 0.5, 0.5, 1.0); // @label Color Slot 3 (Mid-High) | @min 0 | @max 1 | @sens 0.02
+#uniform vec4 u_color_4 : source_color = vec4(0.1, 0.7, 0.9, 1.0); // @label Color Slot 4 (Crest) | @min 0 | @max 1 | @sens 0.02
+#
+#// POSITION OVERRIDES TO REARRANGE WHERE CORES SHIFT
+#uniform float u_pos_split_1 = 0.25; // @label Position Slot 2 | @min 0.05 | @max 0.9 | @sens 0.01
+#uniform float u_pos_split_2 = 0.50; // @label Position Slot 3 | @min 0.10 | @max 0.95 | @sens 0.01
+#uniform float u_pos_split_3 = 0.75; // @label Position Slot 4 | @min 0.15 | @max 0.99 | @sens 0.01
+#
+#float fbm_hash2d(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
+#float fbm_value_noise(vec2 p) {
+	#vec2 i = floor(p); vec2 f = fract(p);
+	#vec2 u = f * f * (3.0 - 2.0 * f);
+	#return mix(mix(fbm_hash2d(i + vec2(0.0, 0.0)), fbm_hash2d(i + vec2(1.0, 0.0)), u.x),
+			   #mix(fbm_hash2d(i + vec2(0.0, 1.0)), fbm_hash2d(i + vec2(1.0, 1.0)), u.x), u.y);
+#}
+#float fbm_octaves(vec2 p) {
+	#float value = 0.0; float amplitude = 0.5; float frequency = 1.0;
+	#for (int i = 0; i < 5; i++) {
+		#if (float(i) >= u_noise_detail) break;
+		#value += amplitude * fbm_value_noise(p * frequency);
+		#frequency *= 2.0; amplitude *= 0.5;
+	#}
+	#return value;
+#}
+#vec4 fx_fbm_cosine(vec2 uv) {
+	#vec2 st = uv * u_warp_frequency;
+	#float scaled_time = u_time * u_flow_speed;
+	#vec2 q = vec2(fbm_octaves(st + vec2(scaled_time * 0.2)), fbm_octaves(st + vec2(5.2, 1.3) + vec2(scaled_time * 0.15)));
+	#vec2 r = vec2(fbm_octaves(st + u_warp_strength * q + vec2(1.7, 9.2) + vec2(scaled_time * 0.3)), fbm_octaves(st + u_warp_strength * q + vec2(8.3, 2.8) + vec2(scaled_time * 0.05)));
+	#float final_field_math = fbm_octaves(st + u_warp_strength * r);
+	#
+	#// Compress the complex domain noise spectrum down to a clean looping color index (0.0 to 1.0)
+	#float t = fract((final_field_math + length(q) * 0.3) * u_palette_frequency);
+	#
+	#vec3 ramp_color;
+	#
+	#// MULTI-STAGE GRADIENT STEP RAMP
+	#if (t < u_pos_split_1) {
+		#float local_t = t / u_pos_split_1;
+		#ramp_color = mix(u_color_1.rgb, u_color_2.rgb, local_t);
+	#} else if (t < u_pos_split_2) {
+		#float local_t = (t - u_pos_split_1) / (u_pos_split_2 - u_pos_split_1);
+		#ramp_color = mix(u_color_2.rgb, u_color_3.rgb, local_t);
+	#} else if (t < u_pos_split_3) {
+		#float local_t = (t - u_pos_split_2) / (u_pos_split_3 - u_pos_split_2);
+		#ramp_color = mix(u_color_3.rgb, u_color_4.rgb, local_t);
+	#} else {
+		#float local_t = (t - u_pos_split_3) / (1.0 - u_pos_split_3);
+		#ramp_color = mix(u_color_4.rgb, u_color_1.rgb, local_t); // Loops seamlessly back to Color 1!
+	#}
+	#
+	#return vec4(ramp_color, 1.0) * (final_field_math * 1.5 + 0.3);
+#}
+#"""
+
+
+#
+#const SRC_FBM_COSINE: String = """
+#uniform vec2 u_warp_frequency = vec2(2.5, 2.5); // @label Warp Frequency | @min 0.1 | @max 12 | @sens 0.05
+#uniform float u_warp_strength = 1.1; // @label Warp Strength | @min 0 | @max 4 | @sens 0.05
+#uniform float u_noise_detail = 4.0; // @label Noise Detail | @min 1 | @max 5 | @sens 1
+#uniform float u_flow_speed = 0.4; // @label Flow Speed | @min 0 | @max 3 | @sens 0.05
+#uniform float u_palette_frequency = 1.0; // @label Color Density | @min 0.2 | @max 5.0 | @sens 0.05
+#
+#uniform vec4 u_color_a : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label Wave Center | @min 0 | @max 1 | @sens 0.02
+#uniform vec4 u_color_b : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label Wave Amplitude | @min 0 | @max 1 | @sens 0.02
+#uniform vec4 u_color_c : source_color = vec4(1.0, 1.0, 1.0, 1.0); // @label Wave Frequency | @min 0 | @max 2 | @sens 0.02
+#uniform vec4 u_color_d : source_color = vec4(0.0, 0.33, 0.67, 1.0); // @label Wave Phase | @min 0 | @max 1 | @sens 0.02
+#
+#float fbm_hash2d(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
+#float fbm_value_noise(vec2 p) {
+	#vec2 i = floor(p); vec2 f = fract(p);
+	#vec2 u = f * f * (3.0 - 2.0 * f);
+	#return mix(mix(fbm_hash2d(i + vec2(0.0, 0.0)), fbm_hash2d(i + vec2(1.0, 0.0)), u.x),
+			   #mix(fbm_hash2d(i + vec2(0.0, 1.0)), fbm_hash2d(i + vec2(1.0, 1.0)), u.x), u.y);
+#}
+#float fbm_octaves(vec2 p) {
+	#float value = 0.0; float amplitude = 0.5; float frequency = 1.0;
+	#for (int i = 0; i < 5; i++) {
+		#if (float(i) >= u_noise_detail) break;
+		#value += amplitude * fbm_value_noise(p * frequency);
+		#frequency *= 2.0; amplitude *= 0.5;
+	#}
+	#return value;
+#}
+#vec4 fx_fbm_cosine(vec2 uv) {
+	#vec2 st = uv * u_warp_frequency;
+	#float scaled_time = u_time * u_flow_speed;
+	#vec2 q = vec2(fbm_octaves(st + vec2(scaled_time * 0.2)), fbm_octaves(st + vec2(5.2, 1.3) + vec2(scaled_time * 0.15)));
+	#vec2 r = vec2(fbm_octaves(st + u_warp_strength * q + vec2(1.7, 9.2) + vec2(scaled_time * 0.3)), fbm_octaves(st + u_warp_strength * q + vec2(8.3, 2.8) + vec2(scaled_time * 0.05)));
+	#float final_field_math = fbm_octaves(st + u_warp_strength * r);
+	#
+	#// Drive the cyclical cosine phase using a mix of the field map and the structural stretch
+	#float t = (final_field_math + length(q) * 0.3) * u_palette_frequency;
+	#vec3 cos_color = u_color_a.rgb + u_color_b.rgb * cos(6.28318 * (u_color_c.rgb * t + u_color_d.rgb));
+	#
+	#return vec4(cos_color, 1.0) * (final_field_math * 1.5 + 0.3);
+#}
+#"""
 
 const SRC_FBM_CYBER: String = """
 uniform vec2 u_warp_frequency = vec2(2.5, 2.5); // @label Warp Frequency | @min 0.1 | @max 12 | @sens 0.05
