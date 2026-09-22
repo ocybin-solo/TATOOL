@@ -1,4 +1,6 @@
 extends Node
+
+signal transition_finished # emitted every time a run finishes, on its own or via _abort()
 ## TransitionLab.gd -- "Screensaver Developer" mode: a test bench for transition effects
 ##
 ## A transition hides a cut between two presets behind a distortion of the final image:
@@ -26,7 +28,7 @@ extends Node
 ## Formula ids and uniform names should stay stable once saved styles exist.
 
 const TIMES: Array = [5.0, 10.0, 20.0]
-const HOLD_FRACTION: float = 0.08 # share of the transition spent holding the peak (covers the snap hitch)
+const HOLD_FRACTION: float = 0.18 # share of the transition spent holding the peak (covers the snap hitch)
 const SENS_DEFAULT_INDEX: int = 2
 const SCREENSAVER_DIR: String = "user://screensaver_presets"
 const NAME_MAX_LENGTH: int = 24
@@ -244,8 +246,25 @@ func start_transition(direction: int) -> void:
 		target = 0 if direction > 0 else entries.size() - 1
 	else:
 		target = posmod(pos + direction, entries.size())
-	_target_entry = entries[target]
 	_playlist_pos = target
+	_begin(entries[target])
+
+## Runs a transition to a specific preset, regardless of the playlist. Used by Screensaver Mode, which
+## picks its own random pairing rather than walking the saved-preset list in order. The transition
+## formula and its peak values must already be set (Screensaver Mode loads a random transition preset
+## into it first).
+func run_transition_to(entry: Dictionary) -> void:
+	if running:
+		return
+	_playlist_size = 0
+	_playlist_pos = -1
+	_begin(entry)
+
+func _begin(entry: Dictionary) -> void:
+	if _material == null:
+		_say("NO TRANSITION FORMULA ACTIVE: PRESS OPT")
+		return
+	_target_entry = entry
 	_snapped = false
 	_t0_msec = Time.get_ticks_msec()
 	running = true
@@ -306,6 +325,7 @@ func _finish() -> void:
 	_apply_rest_values()
 	set_process(false)
 	_update_indicator()
+	transition_finished.emit()
 
 
 # =========================================================================

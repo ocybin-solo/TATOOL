@@ -246,7 +246,7 @@ func _nav_vertical(step: int) -> void:
 			if options_menu and options_menu.is_active():
 				options_menu.handle_vertical(step)
 				return
-			system_menu_index = posmod(system_menu_index + step, 4)
+			system_menu_index = posmod(system_menu_index + step, 5)
 			main_manager.redraw_system_power_menu()
 		ControlState.TIER_1_PASS:
 			if main_manager.active_menu_kind == main_manager.MenuKind.SELECT_PASS:
@@ -410,7 +410,19 @@ func _on_action_button_a() -> void:
 				2:
 					if options_menu:
 						options_menu.open_presets()
-				3: get_tree().quit()
+				3:
+					# START SCREENSAVER: runs with no menu on screen; any tap anywhere stops it
+					if options_menu:
+						var problem: String = options_menu.start_screensaver()
+						if problem == "":
+							active_state = ControlState.HIDDEN
+							if main_manager.menu_overlay_panel and is_instance_valid(main_manager.menu_overlay_panel):
+								main_manager.menu_overlay_panel.queue_free()
+								main_manager.menu_overlay_panel = null
+							main_manager.menu_center_host.visible = false
+						else:
+							options_menu.flash_menu_message(problem)
+				4: get_tree().quit()
 
 		ControlState.TIER_1_PASS:
 			# The last row is RESET ALL PARAMETERS: it clears the effect passes instead of opening a pass

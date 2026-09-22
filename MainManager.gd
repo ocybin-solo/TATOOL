@@ -67,7 +67,7 @@ var is_menu_open: bool = false
 # ShaderLibrary.gd is the single source of truth for every menu. Per pass we track which
 # recipes are active (stack order), the uniform records of the last assembled shader, and
 # a value cache keyed by the final uniform name.
-const DEBUG_DUMMY_RECIPES: int = 12 # extra test formulas so long Tier 2 lists can be tested; set to 0 when done
+const DEBUG_DUMMY_RECIPES: int = 0 # extra test formulas so long Tier 2 lists can be tested; set to 0 when done
 const MENU_PAGE_ROWS: int = 6       # rows visible at once before a menu list scrolls
 var library
 var pass_stack: Array = [[], [], []]
@@ -427,7 +427,7 @@ func redraw_system_power_menu() -> void:
 	label_title.add_theme_color_override("font_color", Color.RED)
 	menu_list_box.add_child(label_title)
 
-	var options = [control_panel.dev_menu_label(), "⚙ APP CONFIG OPTIONS", "🗂 PRESETS", "⏻ EXIT APPLICATION"]
+	var options = [control_panel.dev_menu_label(), "⚙ APP CONFIG OPTIONS", "🗂 PRESETS", "▶ START SCREENSAVER", "⏻ EXIT APPLICATION"]
 	for i in range(options.size()):
 		var lbl = Label.new()
 		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

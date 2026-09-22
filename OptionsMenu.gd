@@ -62,6 +62,7 @@ var sens_idx: int = DEFAULT_SENS_INDEX
 
 var presets # PresetsMenu.gd (System Main Menu > PRESETS)
 var lab # TransitionLab.gd (System Main Menu > SCREENSAVER DEV, and the OPT lab menu)
+var saver # ScreensaverMode.gd (System Main Menu > START SCREENSAVER)
 
 var layout # ControllerLayout.gd (button grid, orientation, swaps, screen flip, icons)
 var ctx_button: String = "" # the button chosen in the icon list
@@ -86,6 +87,9 @@ func setup(main_manager) -> void:
 	lab = load("res://TransitionLab.gd").new()
 	main.add_child(lab) # a Node, so it can run every frame during a transition
 	lab.setup(main, self)
+	saver = load("res://ScreensaverMode.gd").new()
+	main.add_child(saver)
+	saver.setup(main, self)
 
 func _read_default_button_color() -> Color:
 	var buttons: Array = _collect_buttons(main.ui_canvas_layer)
@@ -240,6 +244,20 @@ func toggle_dev_mode() -> void:
 ## D-pad / A / B while developer mode is on and no menu is open. Returns true when it handled the press.
 func dev_input(action: String) -> bool:
 	return lab != null and lab.dev_input(action)
+
+## System Main Menu > START SCREENSAVER. Returns "" on success, or a short reason it could not start.
+func start_screensaver() -> String:
+	return saver.start() if saver != null else "NOT READY YET"
+
+## A one-line message appended under whichever menu is currently open (used when a menu action fails).
+func flash_menu_message(text: String) -> void:
+	if not is_instance_valid(main.menu_list_box):
+		return
+	var lbl := Label.new()
+	lbl.text = " ⚠ %s " % text
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.add_theme_color_override("font_color", Color.ORANGE)
+	main.menu_list_box.add_child(lbl)
 
 
 # =========================================================================
