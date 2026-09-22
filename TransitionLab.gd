@@ -20,7 +20,8 @@ extends Node
 ##           The formula MUST look like "no effect" at its rest values. The default (8.0) is the peak.
 ##   No @rest: a fixed setting (any type) that keeps the value you dial in.
 ## Formula kinds:  "warp"   vec2 fx_<id>(vec2 uv)                   moves where the image is sampled
-##                 "color"  vec4 fx_<id>(vec4 c, vec2 uv)          changes the sampled color
+##                 "color"  vec4 fx_<id>(vec4 c, vec2 uv, sampler2D screen)   changes the sampled color
+##                          (TEXTURE only exists inside fragment(); pass it in as "screen" to sample it, as fx_chroma does)
 ## Use screen-relative units (fractions of the screen), so a setting behaves the same on any device.
 ## Formula ids and uniform names should stay stable once saved styles exist.
 
@@ -80,9 +81,9 @@ var _re_uniform: RegEx
 # =========================================================================
 # SETUP
 # =========================================================================
-func setup(main_manager, owner: Object) -> void:
+func setup(main_manager, owner_options: Object) -> void:
 	main = main_manager
-	owner_menu = owner
+	owner_menu = owner_options
 	_re_uniform = RegEx.new()
 	# groups: 1 type, 2 name, 3 hint, 4 default literal, 5 comment tags
 	_re_uniform.compile("^\\s*uniform\\s+(float|vec2|vec4)\\s+(\\w+)\\s*(?::\\s*([^=;]+?))?\\s*=\\s*([^;]+);\\s*(?://(.*))?$")
@@ -352,10 +353,10 @@ func _assemble() -> Dictionary:
 		if f["kind"] == "warp":
 			warp_calls += "\tuv = fx_%s(uv);\n" % id
 		else:
-			color_calls += "\tc = fx_%s(c, UV);\n" % id
+			color_calls += "\tc = fx_%s(c, UV, TEXTURE);\n" % id
 	var code: String = "shader_type canvas_item;\nuniform float u_time;\n"
-	code += "\n".join(decls) + "\n\n" + "\n".join(funcs) + "\n\n"
 	code += "vec2 tatool_mirror(vec2 x) {\n\treturn abs(mod(x + 1.0, 2.0) - 1.0);\n}\n\n"
+	code += "\n".join(decls) + "\n\n" + "\n".join(funcs) + "\n\n"
 	code += "void fragment() {\n\tvec2 uv = UV;\n" + warp_calls
 	code += "\tvec4 c = texture(TEXTURE, tatool_mirror(uv));\n" + color_calls + "\tCOLOR = c;\n}\n"
 	return {"code": code, "records": records}
@@ -714,6 +715,12 @@ func _register_formulas() -> void:
 	_add_formula("pixelate", "PIXELATE", "warp", SRC_PIXELATE)
 	_add_formula("zoom", "ZOOM", "warp", SRC_ZOOM)
 	_add_formula("flash", "COLOR DIP", "color", SRC_FLASH)
+	_add_formula("tunnel", "TUNNEL PULL", "warp", SRC_TUNNEL)
+	_add_formula("slice", "SLICE JITTER", "warp", SRC_SLICE)
+	_add_formula("dissolve", "NOISE DISSOLVE", "color", SRC_DISSOLVE)
+	_add_formula("chroma", "CHROMA SPLIT", "color", SRC_CHROMA)
+	_add_formula("petals", "PETAL WARP", "warp", SRC_PETALS)
+	_add_formula("scanroll", "SCANLINE ROLL", "warp", SRC_SCANROLL)
 
 func _add_formula(id: String, display_name: String, kind: String, source: String) -> void:
 	formulas[id] = {"id": id, "name": display_name, "kind": kind, "source": source}
@@ -782,7 +789,86 @@ const SRC_FLASH: String = """
 uniform float u_dip = 1.0; // @label Dip Amount | @min 0 | @max 1 | @sens 0.05 | @rest 0
 uniform vec4 u_dip_color : source_color = vec4(0.0, 0.0, 0.0, 1.0); // @label Dip Color | @min 0 | @max 1 | @sens 0.02
 
-vec4 fx_flash(vec4 c, vec2 uv) {
+vec4 fx_flash(vec4 c, vec2 uv, sampler2D screen) {
 	return vec4(mix(c.rgb, u_dip_color.rgb, u_dip), c.a);
+}
+"""
+
+const SRC_TUNNEL: String = """
+uniform float u_pull = 3.5; // @label Tunnel Pull | @min -20 | @max 20 | @sens 0.2 | @rest 0
+uniform vec2 u_center = vec2(0.5, 0.5); // @label Center | @min 0 | @max 1 | @sens 0.01
+
+vec2 fx_tunnel(vec2 uv) {
+	vec2 p = uv - u_center;
+	float r = length(p);
+	float a = atan(p.y, p.x);
+	float new_r = pow(max(r, 0.0001), 1.0 / (1.0 + abs(u_pull) * 0.3));
+	if (u_pull < 0.0) {
+		new_r = r + (r - new_r);
+	}
+	return u_center + vec2(cos(a), sin(a)) * new_r;
+}
+"""
+
+const SRC_SLICE: String = """
+uniform float u_amount = 0.25; // @label Slice Amount | @min 0 | @max 1 | @sens 0.02 | @rest 0
+uniform float u_bands = 14.0; // @label Band Count | @min 2 | @max 60 | @sens 1
+uniform float u_seed = 7.0; // @label Random Seed | @min 0 | @max 100 | @sens 1
+
+float slice_hash(float n) { return fract(sin(n * 12.9898 + u_seed) * 43758.5453); }
+
+vec2 fx_slice(vec2 uv) {
+	float band = floor(uv.y * u_bands);
+	float off = (slice_hash(band) - 0.5) * u_amount;
+	return vec2(uv.x + off, uv.y);
+}
+"""
+
+const SRC_DISSOLVE: String = """
+uniform float u_amount = 1.0; // @label Dissolve Amount | @min 0 | @max 1 | @sens 0.05 | @rest 0
+uniform float u_scale = 40.0; // @label Noise Scale | @min 4 | @max 150 | @sens 1
+
+float dissolve_hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
+
+vec4 fx_dissolve(vec4 c, vec2 uv, sampler2D screen) {
+	float n = dissolve_hash(floor(uv * u_scale));
+	float cut = step(n, u_amount);
+	return vec4(c.rgb * (1.0 - cut), c.a);
+}
+"""
+
+const SRC_CHROMA: String = """
+uniform float u_shift = 0.02; // @label Channel Shift | @min 0 | @max 0.1 | @sens 0.002 | @rest 0
+uniform vec2 u_direction = vec2(1.0, 0.0); // @label Shift Direction | @min -1 | @max 1 | @sens 0.05
+
+vec4 fx_chroma(vec4 c, vec2 uv, sampler2D screen) {
+	vec2 off = normalize(u_direction + vec2(0.0001)) * u_shift;
+	float r = texture(screen, tatool_mirror(uv + off)).r;
+	float b = texture(screen, tatool_mirror(uv - off)).b;
+	return vec4(r, c.g, b, c.a);
+}
+"""
+
+const SRC_PETALS: String = """
+uniform float u_amount = 6.0; // @label Petal Warp | @min -20 | @max 20 | @sens 0.25 | @rest 0
+uniform float u_petals = 5.0; // @label Petal Count | @min 2 | @max 16 | @sens 1
+uniform vec2 u_center = vec2(0.5, 0.5); // @label Center | @min 0 | @max 1 | @sens 0.01
+
+vec2 fx_petals(vec2 uv) {
+	vec2 p = uv - u_center;
+	float r = length(p);
+	float a = atan(p.y, p.x);
+	float push = sin(a * u_petals) * u_amount * 0.02;
+	return u_center + p * (1.0 + push / max(r, 0.05));
+}
+"""
+
+const SRC_SCANROLL: String = """
+uniform float u_amount = 0.06; // @label Roll Amount | @min 0 | @max 0.3 | @sens 0.005 | @rest 0
+uniform float u_speed = 6.0; // @label Roll Speed | @min 0 | @max 30 | @sens 0.5
+
+vec2 fx_scanroll(vec2 uv) {
+	float wobble = sin(uv.y * 60.0 + u_time * u_speed) * u_amount;
+	return vec2(uv.x + wobble * (1.0 - abs(uv.y - 0.5) * 2.0), uv.y);
 }
 """

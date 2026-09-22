@@ -60,9 +60,9 @@ func _default_config() -> Dictionary:
 # =========================================================================
 # SETUP: move the existing buttons into the grid
 # =========================================================================
-func setup(main_manager, owner: Object) -> void:
+func setup(main_manager, owner_options: Object) -> void:
 	main = main_manager
-	owner_menu = owner
+	owner_menu = owner_options
 	configs = [_default_config(), _default_config()]
 	_capture()
 	if not ready_ok:

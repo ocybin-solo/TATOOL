@@ -36,9 +36,9 @@ var _panel_ref: Object = null
 var _name_edit = null
 
 
-func setup(main_manager, owner: Object) -> void:
+func setup(main_manager, owner_options: Object) -> void:
 	main = main_manager
-	owner_menu = owner
+	owner_menu = owner_options
 
 
 # =========================================================================
