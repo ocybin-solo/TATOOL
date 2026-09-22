@@ -388,13 +388,13 @@ func _draw_load_list() -> void:
 	for i in range(start, stop):
 		main._add_menu_row(String(entries[i]["name"]), i == list_cursor)
 	if scrolling: main._add_scroll_hint(stop < entries.size(), "▼")
-	_add_label(" A LOAD    ◄ ► DELETE ", Color.DIM_GRAY)
+	_add_label(" ✔️= LOAD    ◄ ► DELETE ", Color.DIM_GRAY)
 	_add_status()
 
 func _draw_confirm_delete() -> void:
 	_add_label(" DELETE THIS PRESET? ", Color.ORANGE)
 	_add_label(String(entries[list_cursor]["name"]), Color.WHITE)
-	_add_label(" A = YES, DELETE    B = NO ", Color.YELLOW)
+	_add_label(" ✔️ = YES, DELETE    ❌ = NO ", Color.YELLOW)
 
 func _draw_name_entry() -> void:
 	_add_label(" 💾 SAVE PRESET ", Color.CHARTREUSE)
@@ -411,8 +411,8 @@ func _draw_name_entry() -> void:
 	_name_edit.focus_exited.connect(_on_typing_stopped)
 	main.menu_list_box.add_child(_name_edit)
 
-	_add_label(" A OR KEYBOARD DONE = SAVE ", Color.YELLOW)
-	_add_label(" B = CANCEL ", Color.DARK_GRAY)
+	_add_label(" ✔️ OR KEYBOARD DONE = SAVE ", Color.YELLOW)
+	_add_label(" ❌ = CANCEL ", Color.DARK_GRAY)
 
 ## A short message that outlives the menu (used after loading a preset).
 func _toast(text: String) -> void:

@@ -63,6 +63,7 @@ var sens_idx: int = DEFAULT_SENS_INDEX
 var presets # PresetsMenu.gd (System Main Menu > PRESETS)
 var lab # TransitionLab.gd (System Main Menu > SCREENSAVER DEV, and the OPT lab menu)
 var saver # ScreensaverMode.gd (System Main Menu > START SCREENSAVER)
+var help # HelpViewer.gd (System Main Menu > HELP)
 
 var layout # ControllerLayout.gd (button grid, orientation, swaps, screen flip, icons)
 var ctx_button: String = "" # the button chosen in the icon list
@@ -90,6 +91,9 @@ func setup(main_manager) -> void:
 	saver = load("res://ScreensaverMode.gd").new()
 	main.add_child(saver)
 	saver.setup(main, self)
+	help = load("res://HelpViewer.gd").new()
+	main.add_child(help)
+	help.setup(main, self)
 
 func _read_default_button_color() -> Color:
 	var buttons: Array = _collect_buttons(main.ui_canvas_layer)

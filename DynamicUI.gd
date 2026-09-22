@@ -10,7 +10,8 @@ enum ControlState {
 	TIER_3_UNIFORM,   # Old Tier 2 Uniform List
 	TIER_4_PARAMETER, # Old Tier 3 Sub-Channel Axis List
 	TIER_5_TWEAK,     # Old Tier 4 Live Tweak Console Box
-	SYSTEM_MENU
+	SYSTEM_MENU,
+	HELP_VIEW         # README.md open, scrolling with the D-pad (HelpViewer.gd)
 }
 
 var active_state: int = ControlState.HIDDEN
@@ -150,9 +151,9 @@ func setup_ui_layout() -> void:
 
 	# A Button (✔ ACCEPT)
 	btn_channel = Button.new()
-	btn_channel.text = "▢"
+	btn_channel.text = "✔️"
 	btn_channel.custom_minimum_size = Vector2(96, 96)
-	btn_channel.add_theme_font_size_override("font_size", 36)
+	btn_channel.add_theme_font_size_override("font_size", 24)
 	btn_channel.add_theme_color_override("font_color", Color.GREEN)
 	btn_channel.pressed.connect(_on_action_button_a) # Wired to Accept logic
 	action_row.add_child(btn_channel)
@@ -164,9 +165,9 @@ func setup_ui_layout() -> void:
 
 	# B Button (❌ BACK)
 	btn_sens_left = Button.new()
-	btn_sens_left.text = "▢"
+	btn_sens_left.text = "❌"
 	btn_sens_left.custom_minimum_size = Vector2(96, 96)
-	btn_sens_left.add_theme_font_size_override("font_size", 36)
+	btn_sens_left.add_theme_font_size_override("font_size", 24)
 	btn_sens_left.add_theme_color_override("font_color", Color.RED)
 	btn_sens_left.pressed.connect(_on_action_button_b) # Wired to Exit/Back logic
 	action_row.add_child(btn_sens_left)
@@ -189,18 +190,18 @@ func setup_ui_layout() -> void:
 	# Row 1: Dead Space | UP | Dead Space
 	dpad_grid.add_child(Control.new())
 	btn_param_up = Button.new()
-	btn_param_up.text = "△"
+	btn_param_up.text = "▴"
 	btn_param_up.custom_minimum_size = Vector2(96, 96)
-	btn_param_up.add_theme_font_size_override("font_size", 44)
+	btn_param_up.add_theme_font_size_override("font_size", 56)
 	btn_param_up.pressed.connect(_on_dpad_up) # Wired to Navigate Up
 	dpad_grid.add_child(btn_param_up)
 	dpad_grid.add_child(Control.new())
 
 	# Row 2: LEFT | CENTER DISPLAY INDEX | RIGHT
 	btn_channel_prev = Button.new()
-	btn_channel_prev.text = "◁"
+	btn_channel_prev.text = "◂"
 	btn_channel_prev.custom_minimum_size = Vector2(96, 96)
-	btn_channel_prev.add_theme_font_size_override("font_size", 44)
+	btn_channel_prev.add_theme_font_size_override("font_size", 56)
 	btn_channel_prev.pressed.connect(_on_dpad_left) # Wired to Cycle Left
 	dpad_grid.add_child(btn_channel_prev)
 
@@ -212,18 +213,18 @@ func setup_ui_layout() -> void:
 	dpad_grid.add_child(label_sens_indicator)
 
 	btn_channel_next = Button.new()
-	btn_channel_next.text = "▷"
+	btn_channel_next.text = "▸"
 	btn_channel_next.custom_minimum_size = Vector2(96, 96)
-	btn_channel_next.add_theme_font_size_override("font_size", 44)
+	btn_channel_next.add_theme_font_size_override("font_size", 56)
 	btn_channel_next.pressed.connect(_on_dpad_right) # Wired to Cycle Right
 	dpad_grid.add_child(btn_channel_next)
 
 	# Row 3: Dead Space | DOWN | Dead Space
 	dpad_grid.add_child(Control.new())
 	btn_param_down = Button.new()
-	btn_param_down.text = "▽"
+	btn_param_down.text = "▾"
 	btn_param_down.custom_minimum_size = Vector2(96, 96)
-	btn_param_down.add_theme_font_size_override("font_size", 44)
+	btn_param_down.add_theme_font_size_override("font_size", 56)
 	btn_param_down.pressed.connect(_on_dpad_down) # Wired to Navigate Down
 	dpad_grid.add_child(btn_param_down)
 	dpad_grid.add_child(Control.new())
@@ -246,8 +247,11 @@ func _nav_vertical(step: int) -> void:
 			if options_menu and options_menu.is_active():
 				options_menu.handle_vertical(step)
 				return
-			system_menu_index = posmod(system_menu_index + step, 5)
+			system_menu_index = posmod(system_menu_index + step, 6)
 			main_manager.redraw_system_power_menu()
+		ControlState.HELP_VIEW:
+			if options_menu and options_menu.help:
+				options_menu.help.scroll(step)
 		ControlState.TIER_1_PASS:
 			if main_manager.active_menu_kind == main_manager.MenuKind.SELECT_PASS:
 				main_manager._step_select_pass_highlight(step)
@@ -329,6 +333,11 @@ func _on_action_button_b() -> void:
 				main_manager.menu_overlay_panel.queue_free()
 				main_manager.menu_overlay_panel = null
 			main_manager.menu_center_host.visible = false
+
+		ControlState.HELP_VIEW:
+			if options_menu and options_menu.help:
+				options_menu.help.close()
+			active_state = ControlState.HIDDEN
 
 		ControlState.TIER_5_TWEAK:
 			# Single-parameter uniforms skipped Tier 4 on the way in, so skip it on the way out too
@@ -422,7 +431,15 @@ func _on_action_button_a() -> void:
 							main_manager.menu_center_host.visible = false
 						else:
 							options_menu.flash_menu_message(problem)
-				4: get_tree().quit()
+				4:
+					# HELP: shows README.md; the main menu closes, and ✔️ returns to normal
+					if options_menu and options_menu.help:
+						options_menu.help.open()
+						active_state = ControlState.HELP_VIEW
+						if main_manager.menu_overlay_panel and is_instance_valid(main_manager.menu_overlay_panel):
+							main_manager.menu_overlay_panel.queue_free()
+							main_manager.menu_overlay_panel = null
+				5: get_tree().quit()
 
 		ControlState.TIER_1_PASS:
 			# The last row is RESET ALL PARAMETERS: it clears the effect passes instead of opening a pass

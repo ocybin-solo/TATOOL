@@ -10,6 +10,8 @@ var control_panel: VBoxContainer
 # Dedicated Visual Warning Label for the Safety Valve
 var label_safety_alert: Label
 var label_perf_monitor: Label
+var vram_display_visible: bool = false
+var perf_bar: PanelContainer
 
 # --- START MENU HOOKS ---
 var menu_overlay_panel: PanelContainer
@@ -84,11 +86,46 @@ func _ready() -> void:
 	current_preset = load("res://PatternPreset.gd").new()
 	setup_three_pass_pipeline()
 	setup_interface_layer()
+	## performance display
+	var perf_layer := CanvasLayer.new()
+	perf_layer.layer = 3
+	add_child(perf_layer)
+
+	perf_bar = PanelContainer.new()
+	var perf_style := StyleBoxFlat.new()
+	perf_style.bg_color = Color(0, 0, 0, 0.75)
+	perf_style.content_margin_top = 2
+	perf_style.content_margin_bottom = 2
+	perf_bar.add_theme_stylebox_override("panel", perf_style)
+	perf_bar.anchor_left = 0.0
+	perf_bar.anchor_right = 1.0
+	perf_bar.anchor_top = 1.0
+	perf_bar.anchor_bottom = 1.0
+	perf_bar.offset_left = 0.0
+	perf_bar.offset_right = 0.0
+	perf_bar.offset_top = -28.0
+	perf_bar.offset_bottom = 0.0
+	perf_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	perf_bar.visible = vram_display_visible
+	perf_layer.add_child(perf_bar)
+	label_perf_monitor = Label.new()
+	label_perf_monitor.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label_perf_monitor.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	perf_bar.add_child(label_perf_monitor)	
+	## end of vram performance warning 
+	
 	load_default_test_shaders()
 	
 	# Cleaned up container constraints for the compact hardware chassis block
 	control_panel.custom_minimum_size = Vector2(0, 240)
 	control_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+
+
+func toggle_vram_display() -> void:
+	print("yo")
+	vram_display_visible = not vram_display_visible
+	perf_bar.visible = vram_display_visible
+
 
 func setup_three_pass_pipeline() -> void:
 	display_row_container = HBoxContainer.new()
@@ -222,11 +259,11 @@ func setup_interface_layer() -> void:
 
 	# 🌟 OPT Button on BOTTOM
 	btn_select_pass = Button.new()
-	btn_select_pass.text = "🔵\n"
+	btn_select_pass.text = "🎛\n"
 	btn_select_pass.custom_minimum_size = Vector2(96, 96)
 	btn_select_pass.size_flags_vertical = Control.SIZE_SHRINK_END
 	btn_select_pass.add_theme_color_override("font_color", Color.CORNFLOWER_BLUE)
-	btn_select_pass.add_theme_font_size_override("font_size", 36)
+	btn_select_pass.add_theme_font_size_override("font_size", 22)
 	# 🌟 WIRE RE-CONNECTED: Link OPT button to its handler method
 	btn_select_pass.pressed.connect(_on_select_pass_button_pressed)
 	utility_trench.add_child(btn_select_pass)
@@ -236,11 +273,11 @@ func setup_interface_layer() -> void:
 	utility_trench.add_child(util_spacer)
 		# 🌟 PWR Button on TOP
 	btn_shader_menu = Button.new()
-	btn_shader_menu.text = "🟡\n"
+	btn_shader_menu.text = "⚙️\n"
 	btn_shader_menu.custom_minimum_size = Vector2(96, 96)
 	btn_shader_menu.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	btn_shader_menu.add_theme_color_override("font_color", Color.GOLD)
-	btn_shader_menu.add_theme_font_size_override("font_size", 36)
+	btn_shader_menu.add_theme_font_size_override("font_size", 28)
 	# 🌟 WIRE RE-CONNECTED: Link PWR button to its handler method
 	btn_shader_menu.pressed.connect(_on_shader_menu_button_pressed)
 	utility_trench.add_child(btn_shader_menu)
@@ -290,7 +327,7 @@ func open_select_pass_menu() -> void:
 	select_pass_overlay_panel = PanelContainer.new()
 	select_pass_overlay_panel.custom_minimum_size = Vector2(340, 220)
 	var style = StyleBoxFlat.new()
-	style.bg_color = Color(0.02, 0.02, 0.04, 0.92)
+	style.bg_color = Color(0.02, 0.02, 0.04, 0.75)
 	style.set_border_width_all(2)
 	style.border_color = Color(1.0, 0.55, 0.0, 0.9)
 	style.set_corner_radius_all(8)
@@ -378,19 +415,22 @@ func close_select_pass_menu(confirm: bool) -> void:
 # ------------------------------------------------------------------
 # SHADER MENU -- the PWR button / system menu below is unchanged.
 # ------------------------------------------------------------------
-
 func _on_shader_menu_button_pressed() -> void:
 	# 🌟 THE ⏻ PWR TOGGLE: Master handler for the System Main Menu overlay
 	if control_panel.active_state == control_panel.ControlState.SYSTEM_MENU:
-		print("⏻ PWR Tapped: Direct Escape Cutoff -> Forcing HIDDEN State")
+		print("🟡 Tapped: Direct Escape Cutoff -> Forcing HIDDEN State")
 		control_panel.active_state = control_panel.ControlState.HIDDEN
 		if menu_overlay_panel and is_instance_valid(menu_overlay_panel):
 			menu_overlay_panel.queue_free()
 			menu_overlay_panel = null
 		menu_center_host.visible = false
+		# The readme has its own panel outside menu_overlay_panel, so hiding the shared one above does
+		# not close it on its own -- tell it explicitly so its own "am I open" state stays correct
+		if control_panel.options_menu and control_panel.options_menu.help and control_panel.options_menu.help.is_open:
+			control_panel.options_menu.help.close()
 		return
 
-	print("⏻ PWR Tapped: Opening System Main Menu -> SYSTEM_MENU")
+	print("🟡 Tapped: Opening System Main Menu -> SYSTEM_MENU")
 	control_panel.active_state = control_panel.ControlState.SYSTEM_MENU
 	control_panel.system_menu_index = 0 # Default highlight cursor to row 0 (BACK)
 
@@ -399,12 +439,22 @@ func _on_shader_menu_button_pressed() -> void:
 		select_pass_overlay_panel.queue_free()
 		select_pass_overlay_panel = null
 
+	# Also clean up any Tier 2-5 / Options / Presets / Controller Layout / Screensaver Dev panel that
+	# might still be open in the SHARED overlay panel, so it doesn't linger underneath the new one
+	if menu_overlay_panel and is_instance_valid(menu_overlay_panel):
+		menu_overlay_panel.queue_free()
+		menu_overlay_panel = null
+
+	# The readme uses its own separate panel rather than the shared one above, so it needs its own check
+	if control_panel.options_menu and control_panel.options_menu.help and control_panel.options_menu.help.is_open:
+		control_panel.options_menu.help.close()
+
 	# Build a clean, high-contrast text-mode box for System operations
 	menu_center_host.visible = true
 	menu_overlay_panel = PanelContainer.new()
 	menu_overlay_panel.custom_minimum_size = Vector2(340, 220)
 	var style = StyleBoxFlat.new()
-	style.bg_color = Color(0.04, 0.01, 0.01, 0.95) # Distinct deep charcoal-red tint
+	style.bg_color = Color(0.04, 0.01, 0.01, 0.75) # Distinct deep charcoal-red tint
 	style.set_border_width_all(2)
 	style.border_color = Color(1.0, 0.2, 0.2, 0.9) # Crimson alert frame
 	style.set_corner_radius_all(6)
@@ -427,7 +477,7 @@ func redraw_system_power_menu() -> void:
 	label_title.add_theme_color_override("font_color", Color.RED)
 	menu_list_box.add_child(label_title)
 
-	var options = [control_panel.dev_menu_label(), "⚙ APP CONFIG OPTIONS", "🗂 PRESETS", "▶ START SCREENSAVER", "⏻ EXIT APPLICATION"]
+	var options = [control_panel.dev_menu_label(), "⚙ APP CONFIG OPTIONS", "🗂 PRESETS", "▶ START SCREENSAVER", "❓ HELP", "⏻ EXIT APPLICATION"]
 	for i in range(options.size()):
 		var lbl = Label.new()
 		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -561,7 +611,7 @@ func _ensure_cyan_panel() -> void:
 	menu_overlay_panel = PanelContainer.new()
 	menu_overlay_panel.custom_minimum_size = Vector2(340, 260)
 	var style = StyleBoxFlat.new()
-	style.bg_color = Color(0.02, 0.02, 0.04, 0.92)
+	style.bg_color = Color(0.02, 0.02, 0.04, 0.75)
 	style.set_border_width_all(2)
 	style.border_color = Color(0.0, 0.85, 1.0, 0.9)
 	style.set_corner_radius_all(8)
@@ -897,10 +947,10 @@ func load_default_test_shaders() -> void:
 	# Boot: build all three passes from the recipe library. Pass 1 starts on the FBM pattern;
 	# Passes 2 and 3 start empty (clear-glass bypass) until a formula is chosen in Tier 2.
 	library = load("res://ShaderLibrary.gd").new()
-	if DEBUG_DUMMY_RECIPES > 0:
-		library.add_dummy_recipes(DEBUG_DUMMY_RECIPES)
+	#if DEBUG_DUMMY_RECIPES > 0:
+		#library.add_dummy_recipes(DEBUG_DUMMY_RECIPES)
 
-	pass_stack = [["fbm"], [], []]
+	pass_stack = [["that_intro"], ["chromatic_ripple"], []]
 	for p in range(3):
 		rebuild_pass(p)
 

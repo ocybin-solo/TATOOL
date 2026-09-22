@@ -385,19 +385,24 @@ func global_uniforms(records: Array) -> Array:
 # =========================================================================
 func _register_builtin_recipes() -> void:
 
+	## PASS 1  (Patterns)
 
 	_register("fbm_master", PASS_PATTERN, "FBM: MASTER FIELD", SRC_FBM_MASTER, false)	
 	_register("gyroid_master", PASS_PATTERN, "GYROID: MASTER FIELD", SRC_GYROID_MASTER, false)
 	_register("voronoi_master", PASS_PATTERN, "VORONOI: MASTER FIELD", SRC_VORONOI_MASTER, false)  
 	_register("plasma_master", PASS_PATTERN, "PLASMA: MASTER FIELD", SRC_PLASMA_MASTER, false)    
-	
- 
+	_register("fractal_master", PASS_PATTERN, "FRACTAL: MASTER FIELD", SRC_FRACTAL_MASTER, false)
+	_register("truchet_master", PASS_PATTERN, "TILE: TRUCHET LABYRINTH", SRC_TRUCHET_MASTER, false)
+	_register("spiro_master", PASS_PATTERN, "GEOMETRY: SPIRO MANDALA", SRC_SPIRO_MASTER, false)
+# 7. KINETIC SIGNAGE (Animated Vector Typography)
+	_register("that_intro", PASS_PATTERN, "INTRO: THAT LOGO", SRC_THAT_INTRO, false)
+
 	# shadertoy open sourced patterns
 	_register("hairy_infinity", PASS_PATTERN, "S.TOY/NR4s HAIRY INFINITY", SRC_HAIRY_INFINITY, false)
 	
 	
 	
-	#######  PASS 2 ########### (Warp Modules) - Stackable!
+	#######  PASS 2 ########### (Warp Modules) - This Pass alone lets you add more than one at a time!
 	_register("kaleidoscope", PASS_WARP, "KALEIDOSCOPE REFLECTION", SRC_KALEIDOSCOPE, true)
 	_register("swirl", PASS_WARP, "RADIAL SWIRL", SRC_SWIRL, true)
 	_register("polar_map", PASS_WARP, "POLAR TUNNEL MAP", SRC_POLAR_MAP, true) 
@@ -422,35 +427,471 @@ func _register_builtin_recipes() -> void:
 	_register("oil_painting", PASS_FILTER, "🖌️ OIL PAINTING CANVAS", SRC_OIL_PAINTING, false)
 	_register("neon_blur", PASS_FILTER, "🔮 NEON GLOW BLUR", SRC_NEON_BLUR, false)
 	_register("fxaa_filter", PASS_FILTER, "✨ FXAA ANTI-ALIASING LENS", SRC_FXAA_FILTER, false)
+
+const SRC_THAT_INTRO: String = """
+uniform float u_render_mode = 0.0; // @label Unfold Style (0=Chunky Block Pop, 1=Smooth Digital Sweep) | @min 0.0 | @max 1.0 | @sens 1.0
+uniform float u_draw_progress = 0.15; // @label Draw Progress (0=Auto Loop, 1=Manual Full) | @min 0.0 | @max 1.0 | @sens 0.01
+uniform float u_grid_thickness = 0.08; // @label Inner Block Bevel | @min 0.01 | @max 0.25 | @sens 0.01
+uniform float u_min_silhouette = 0.12; // @label Persistent Grid Glow | @min 0.0 | @max 0.4 | @sens 0.01
+
+// --- 4-STAGE ADVANCED HIGH-FIDELITY GRADIENT CONTROLS ---
+uniform float u_palette_frequency = 2.3; // @label Color Density Loops | @min 0.2 | @max 5.0 | @sens 0.05
+uniform vec4 u_color_1 : source_color = vec4(0.01, 0.01, 0.03, 1.0); // @label Color Slot 1 (Void Background) | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_2 : source_color = vec4(0.1, 0.0, 0.25, 1.0); // @label Color Slot 2 (Block Silhouette) | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_3 : source_color = vec4(0.0, 0.8, 1.0, 1.0); // @label Color Slot 3 (Neon Circuit Glow) | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_4 : source_color = vec4(1.0, 1.0, 1.0, 1.0); // @label Color Slot 4 (Core Highlight) | @min 0 | @max 1 | @sens 0.02
+uniform float u_base_clamp = 0.10; // @label Banding Bounds 1 | @min 0.0 | @max 0.4 | @sens 0.01
+uniform float u_pos_split_1 = 0.30; // @label Banding Bounds 2 | @min 0.15 | @max 0.6 | @sens 0.01
+uniform float u_pos_split_2 = 0.55; // @label Banding Bounds 3 | @min 0.35 | @max 0.8 | @sens 0.01
+uniform float u_pos_split_3 = 0.80; // @label Banding Bounds 4 | @min 0.60 | @max 0.99 | @sens 0.01
+uniform float u_aa_feather = 0.02; // @label Pixel Anti-Aliasing | @min 0.001 | @max 0.1 | @sens 0.005
+
+// Hardcoded grid matrix graph explicitly spelling out the letters T, H, A, T
+bool check_that_voxel(int cx, int cy) {
+	// LETTER 'T' (Columns 1 to 3)
+	if (cx >= 1 && cx <= 3 && cy == 1) return true; // Top crossbar
+	if (cx == 2 && cy >= 2 && cy <= 5) return true; // Center vertical stem
+	
+	// LETTER 'H' (Columns 5 to 7)
+	if (cx == 5 && cy >= 1 && cy <= 5) return true; // Left wall
+	if (cx == 7 && cy >= 1 && cy <= 5) return true; // Right wall
+	if (cx == 6 && cy == 3) return true;            // Center crossbar
+	
+	// LETTER 'A' (Columns 9 to 11)
+	if (cx >= 9 && cx <= 11 && cy == 1) return true; // Top roof cap
+	if (cx == 9 && cy >= 2 && cy <= 5) return true;  // Left side wall
+	if (cx == 11 && cy >= 2 && cy <= 5) return true; // Right side wall
+	if (cx == 10 && cy == 3) return true;            // Mid crossbar
+	
+	// LETTER 'T' (Columns 13 to 15)
+	if (cx >= 13 && cx <= 15 && cy == 1) return true; // Top crossbar
+	if (cx == 14 && cy >= 2 && cy <= 5) return true;  // Center vertical stem
+	
+	return false;
+}
+
+vec4 fx_that_intro(vec2 uv) {
+	vec2 grid_bounds = vec2(17.0, 7.0);
+	
+	// Your custom non-flipped baseline map
+	vec2 st = vec2(uv.x, uv.y);
+	
+	// --- ANAMORPHIC COMPACT VIEWPORT CONTAINER MATRIX HACK ---
+	// Horizontally: Multiply by 1.6 (2.0 * 0.8) to make it 25% wider than the 50% vertical baseline scale
+	// Vertically: Multiply by 2.0 to retain the exact 50% scale container height
+	st.x = (st.x - 0.5) * 1.0 + 0.5;
+	st.y = (st.y - 0.5) * 2.0 + 0.5;
+	
+	vec2 pixel_space = st * grid_bounds;
+	vec2 cell_id = floor(pixel_space);
+	vec2 cell_uv = fract(pixel_space);
+	
+	int cx = int(cell_id.x);
+	int cy = int(cell_id.y);
+	
+	// Check if this coordinate falls inside our structural letter matrix grid bounds
+	bool is_text_block = check_that_voxel(cx, cy);
+	
+	// Prevent coordinates that scaled outside the central bounding field from rendering phantom letters
+	if (st.x < 0.0 || st.x > 1.0 || st.y < 0.0 || st.y > 1.0) {
+		is_text_block = false;
+	}
+	
+	// --- NON-STOP SEAMLESS PING-PONG TIMELINE ENGINE ---
+	float timeline = (u_draw_progress > 0.0) ? u_draw_progress : fract(u_time * 0.10);
+	
+	// Overlapping sine waves ensure the word morphs rather than vanishing to pure black
+	float wave_reveal = clamp(sin(timeline * 6.2831853) * 0.5 + 0.5, 0.0, 1.0);
+	
+	float block_birth_point = float(cx) / 17.0;
+	float block_alpha = 0.0;
+	
+	int mode = int(floor(u_render_mode + 0.05));
+	
+	if (mode == 0) {
+		block_alpha = step(block_birth_point * 0.7, wave_reveal * 0.8 + 0.1);
+	} else {
+		block_alpha = smoothstep(block_birth_point - 0.15, block_birth_point + 0.05, wave_reveal * 0.8 + 0.1);
+	}
+	
+	// Keep at least half the word alive or force a fallback minimum block weight
+	block_alpha = max(block_alpha, u_min_silhouette);
+	
+	float bevel_edge = max(abs(cell_uv.x - 0.5), abs(cell_uv.y - 0.5)) * 2.0;
+	float block_fill_mask = smoothstep(1.0 - u_grid_thickness, 1.0 - u_grid_thickness - u_aa_feather, bevel_edge);
+	
+	float final_mask = (is_text_block) ? (block_fill_mask * block_alpha) : 0.0;
+	
+	float color_timeline = (cell_id.x / 17.0) + (cell_id.y / 7.0) + (u_time * 0.4);
+	float t = fract((color_timeline + bevel_edge * 0.2) * u_palette_frequency) * final_mask;
+	
+	float w0 = smoothstep(u_base_clamp - u_aa_feather, u_base_clamp + u_aa_feather, t) * step(0.001, final_mask);
+	float w1 = smoothstep(u_pos_split_1 - u_aa_feather, u_pos_split_1 + u_aa_feather, t);
+	float w2 = smoothstep(u_pos_split_2 - u_aa_feather, u_pos_split_2 + u_aa_feather, t);
+	float w3 = smoothstep(u_pos_split_3 - u_aa_feather, u_pos_split_3 + u_aa_feather, t);
+	
+	vec4 voxel_color = mix(u_color_1, u_color_2, w0);
+	voxel_color = mix(voxel_color, u_color_3, w1);
+	voxel_color = mix(voxel_color, u_color_4, w2);
+	voxel_color = mix(voxel_color, u_color_1, w3);
+	
+	// Soft architectural backdrop blueprint grid
+	float background_grid = 0.0;
+	if (is_text_block) {
+		background_grid = max(0.05, u_min_silhouette * 0.5);
+	}
+	
+	vec4 background_canvas = u_color_1 + (u_color_2 * background_grid * block_fill_mask);
+	vec4 final_output = mix(background_canvas, voxel_color, final_mask);
+	
+	return final_output;
+}
+"""
+
+
+
+
+
+const SRC_SPIRO_MASTER: String = """
+uniform float u_render_mode = 0.0; // @label Geometry Style (0=Spirograph Gear, 1=Sacred Star Poly) | @min 0.0 | @max 1.0 | @sens 1.0
+uniform float u_complexity = 6.0; // @label Geometric Petal Count | @min 2.0 | @max 24.0 | @sens 1.0
+uniform float u_gear_ratio = 1.67; // @label [S0 Only] Inner/Outer Gear Ratio | @min 0.2 | @max 5.0 | @sens 0.01
+uniform float u_line_thickness = 0.08; // @label Line Width / Intensity | @min 0.01 | @max 0.35 | @sens 0.005
+uniform float u_spin_speed = 0.2; // @label Rotation Speed | @min -2.0 | @max 2.0 | @sens 0.05
+uniform float u_pulse_speed = 0.4; // @label Color Flow Speed | @min -3.0 | @max 3.0 | @sens 0.05
+
+// --- 4-STAGE ADVANCED HIGH-FIDELITY GRADIENT CONTROLS ---
+uniform float u_palette_frequency = 2.0; // @label Color Ring Density | @min 0.2 | @max 6.0 | @sens 0.05
+uniform vec4 u_color_1 : source_color = vec4(0.01, 0.01, 0.04, 1.0); // @label Color Slot 1 (Core Space) | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_2 : source_color = vec4(0.2, 0.0, 0.4, 1.0); // @label Color Slot 2 (Inner Ring) | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_3 : source_color = vec4(1.0, 0.0, 0.5, 1.0); // @label Color Slot 3 (Glow Vector) | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_4 : source_color = vec4(1.0, 0.9, 0.5, 1.0); // @label Color Slot 4 (Filament Peak) | @min 0 | @max 1 | @sens 0.02
+uniform float u_base_clamp = 0.05; // @label Banding Bounds 1 | @min 0.0 | @max 0.4 | @sens 0.01
+uniform float u_pos_split_1 = 0.25; // @label Banding Bounds 2 | @min 0.15 | @max 0.6 | @sens 0.01
+uniform float u_pos_split_2 = 0.50; // @label Banding Bounds 3 | @min 0.35 | @max 0.8 | @sens 0.01
+uniform float u_pos_split_3 = 0.85; // @label Banding Bounds 4 | @min 0.60 | @max 0.99 | @sens 0.01
+uniform float u_aa_feather = 0.015; // @label Vector Line Smoothness | @min 0.001 | @max 0.1 | @sens 0.002
+
+vec4 fx_spiro_master(vec2 uv) {
+	// Center the workspace coordinates around the screen origin (0, 0)
+	vec2 p = uv - 0.5;
+	
+	// Convert space into standard polar mapping fields
+	float r = length(p) * 2.0;
+	float angle = atan(p.y, p.x);
+	
+	// Apply continuous global rotation tracking over time
+	angle += u_time * u_spin_speed;
+	
+	float geometric_shape = 0.0;
+	int mode = int(floor(u_render_mode + 0.05));
+	
+	if (mode == 0) {
+		// MODE 0: HYPOTROCHOID GEAR ENGINE
+		// Simulate internal nested gear rotation frequencies
+		float gear_folding = angle * u_complexity;
+		float inner_rolling = angle * (u_complexity * u_gear_ratio);
+		
+		// Map the parametric distance vector out to the screen radius
+		float spiro_radius = 0.5 * ((1.0 - u_gear_ratio) * cos(gear_folding) + u_gear_ratio * cos(inner_rolling));
+		float spiro_y = 0.5 * ((1.0 - u_gear_ratio) * sin(gear_folding) - u_gear_ratio * sin(inner_rolling));
+		
+		// Evaluate the mathematical distance threshold from the active radius coordinate
+		float mathematical_distance = length(vec2(cos(angle)*r, sin(angle)*r) - vec2(spiro_radius, spiro_y));
+		geometric_shape = abs(mathematical_distance - 0.25);
+	} 
+	else {
+		// MODE 1: SACRED POLYGON STAR MESH
+		// Segment the angular plane cleanly into separate pie slice segments based on complexity
+		float segment_arcs = 6.28318530 / max(u_complexity, 3.0);
+		float local_arc = floor(angle / segment_arcs) * segment_arcs;
+		
+		// Project sharp linear edge vectors out using dot matrix boundaries
+		float linear_edge = cos(angle - local_arc - (segment_arcs * 0.5)) * r;
+		
+		// Layer multiple overlapping frequency rings to construct an interlocking geometric grid
+		float layer1 = abs(linear_edge - 0.4);
+		float layer2 = abs(linear_edge - 0.2) * 1.5;
+		geometric_shape = min(layer1, layer2);
+	}
+	
+	// Generate an intense current traveling outward down the geometric lines
+	float color_timeline = r - (u_time * u_pulse_speed);
+	
+	// Calculate the razor-sharp vector path outline mask
+	float line_mask = smoothstep(u_line_thickness + u_aa_feather, u_line_thickness, geometric_shape);
+	
+	// Feed the data coordinate pipelines into your 4-stage advanced gradient mixing tables
+	float t = fract((color_timeline + geometric_shape * 0.3) * u_palette_frequency) * line_mask;
+	
+	float w0 = smoothstep(u_base_clamp - u_aa_feather, u_base_clamp + u_aa_feather, t) * step(0.001, line_mask);
+	float w1 = smoothstep(u_pos_split_1 - u_aa_feather, u_pos_split_1 + u_aa_feather, t);
+	float w2 = smoothstep(u_pos_split_2 - u_aa_feather, u_pos_split_2 + u_aa_feather, t);
+	float w3 = smoothstep(u_pos_split_3 - u_aa_feather, u_pos_split_3 + u_aa_feather, t);
+	
+	vec3 geometry_color = mix(u_color_1.rgb, u_color_2.rgb, w0);
+	geometry_color = mix(geometry_color, u_color_3.rgb, w1);
+	geometry_color = mix(geometry_color, u_color_4.rgb, w2);
+	geometry_color = mix(geometry_color, u_color_1.rgb, w3);
+	
+	// Blend the vector filaments over the background space canvas
+	vec3 final_output = mix(u_color_1.rgb, geometry_color, line_mask);
+	
+	return vec4(final_output, 1.0);
+}
+"""
+
+
 	
 
+const SRC_TRUCHET_MASTER: String = """
+uniform float u_render_mode = 0.0; // @label Style (0=Pipe Arcs, 1=Sharp Maze, 2=1704 Triangles, 3=XOR Digital) | @min 0.0 | @max 3.0 | @sens 1.0
+uniform float u_grid_scale = 10.0; // @label Global: Main Tile Scale | @min 4.0 | @max 40.0 | @sens 1.0
+uniform float u_flow_speed = 0.5; // @label Global: Flow / Pulse Speed | @min 0.0 | @max 3.0 | @sens 0.05
+uniform float u_config_cycle_speed = 0.0; // @label Global: Layout Shuffle Speed | @min 0.0 | @max 2.0 | @sens 0.05
+uniform float u_line_thickness = 0.12; // @label [S0+S1] Path Thickness Line | @min 0.01 | @max 0.45 | @sens 0.01
+
+// --- STYLE 3 (XOR DIGITAL MATRIX) CONTROLS ---
+uniform float u_xor_subscale = 3.0; // @label [S3 Only] XOR Sub-Grid Density | @min 1.0 | @max 12.0 | @sens 1.0
+uniform float u_xor_duty = 0.5; // @label [S3 Only] XOR Grid Fill Ratio | @min 0.05 | @max 0.95 | @sens 0.02
+
+// --- 4-STAGE ADVANCED HIGH-FIDELITY GRADIENT CONTROLS ---
+uniform float u_palette_frequency = 1.0; // @label Color Density Loops | @min 0.2 | @max 5.0 | @sens 0.05
+uniform vec4 u_color_1 : source_color = vec4(0.01, 0.01, 0.04, 1.0); // @label Color Slot 1 (Background/Base) | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_2 : source_color = vec4(0.1, 0.0, 0.3, 1.0); // @label Color Slot 2 (Mid-Low Profile) | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_3 : source_color = vec4(0.0, 0.8, 1.0, 1.0); // @label Color Slot 3 (Glow Pulse Lane) | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_4 : source_color = vec4(1.0, 1.0, 1.0, 1.0); // @label Color Slot 4 (Filament Center) | @min 0 | @max 1 | @sens 0.02
+uniform float u_base_clamp = 0.10; // @label Banding Bounds 1 | @min 0.0 | @max 0.4 | @sens 0.01
+uniform float u_pos_split_1 = 0.30; // @label Banding Bounds 2 | @min 0.15 | @max 0.6 | @sens 0.01
+uniform float u_pos_split_2 = 0.55; // @label Banding Bounds 3 | @min 0.35 | @max 0.8 | @sens 0.01
+uniform float u_pos_split_3 = 0.80; // @label Banding Bounds 4 | @min 0.60 | @max 0.99 | @sens 0.01
+uniform float u_aa_feather = 0.02; // @label Border Edge Softness | @min 0.001 | @max 0.1 | @sens 0.005
+
+// Upgraded cellular random hash that accepts a time-evolution parameter
+float truchet_hash2d(vec2 p, float seed) {
+	return fract(sin(dot(p + vec2(seed, -seed), vec2(127.1, 311.7))) * 43758.5453123);
+}
+
+vec4 fx_truchet_master(vec2 uv) {
+	vec2 st = uv * u_grid_scale;
+	vec2 grid_id = floor(st);
+	vec2 cell_uv = fract(st);
+	
+	// Generate a stepped layout baseline time clock to step configurations smoothly
+	float layout_time = u_time * u_config_cycle_speed;
+	float current_seed = floor(layout_time);
+	float next_seed = current_seed + 1.0;
+	float transition_progress = smoothstep(0.7, 1.0, fract(layout_time)); // Snaps rapidly at the end of a cycle
+	
+	// Evaluate the random coin flipper using the layout clock
+	float coin_now = truchet_hash2d(grid_id, current_seed);
+	float coin_next = truchet_hash2d(grid_id, next_seed);
+	float coin = mix(coin_now, coin_next, transition_progress);
+	
+	// Conditionally mirror coordinate spaces depending on the active random hash value
+	if (coin > 0.5) {
+		cell_uv.x = 1.0 - cell_uv.x;
+	}
+	
+	float distance_to_path = 0.0;
+	float path_mask = 0.0;
+	float path_timeline = cell_uv.x + cell_uv.y + (u_time * u_flow_speed);
+	
+	int mode = int(floor(u_render_mode + 0.05));
+	
+	if (mode == 0) {
+		// MODE 0: CYRIL STANLEY SMITH QUARTER-ARCS (1987)
+		float d_bottom_left = length(cell_uv);
+		float d_top_right = length(cell_uv - vec2(1.0));
+		float closest_arc = (d_bottom_left < 0.5) ? d_bottom_left : d_top_right;
+		
+		distance_to_path = abs(closest_arc - 0.5);
+		path_mask = smoothstep(u_line_thickness + u_aa_feather, u_line_thickness, distance_to_path);
+	} 
+	else if (mode == 1) {
+		// MODE 1: DIAGONAL ZIG-ZAG MAZE LINES
+		distance_to_path = abs(cell_uv.x - cell_uv.y) / 1.41421356;
+		path_mask = smoothstep(u_line_thickness + u_aa_feather, u_line_thickness, distance_to_path);
+	}
+	else if (mode == 2) {
+		// MODE 2: SÉBASTIEN TRUCHET CONTRASTING TRIANGLES (ORIGINAL 1704)
+		float edge = cell_uv.x - cell_uv.y;
+		path_mask = smoothstep(-u_aa_feather, u_aa_feather, edge);
+		distance_to_path = abs(edge);
+	}
+	else {
+		// MODE 3: MODERN GEOMETRIC / DIGITAL XOR CODES
+		float subscale_clamped = max(floor(u_xor_subscale), 1.0);
+		vec2 pixel_coords = cell_uv * subscale_clamped;
+		
+		float x_pixels = floor(pixel_coords.x);
+		float y_pixels = floor(pixel_coords.y);
+		
+		float xor_pattern = mod(x_pixels + y_pixels, 2.0);
+		
+		vec2 sub_fract = fract(pixel_coords);
+		float box_edge = max(abs(sub_fract.x - 0.5), abs(sub_fract.y - 0.5)) * 2.0;
+		
+		if (xor_pattern > 0.5) {
+			path_mask = smoothstep(u_xor_duty + u_aa_feather, u_xor_duty, box_edge);
+		} else {
+			path_mask = smoothstep(u_xor_duty + u_aa_feather, u_xor_duty, 1.0 - box_edge);
+		}
+		
+		distance_to_path = cell_uv.x;
+	}
+	
+	// Compress data pipeline down to feed our 4-stage advanced gradient mixing tables
+	float t = fract((path_timeline + distance_to_path * 0.5) * u_palette_frequency) * path_mask;
+	
+	float w0 = smoothstep(u_base_clamp - u_aa_feather, u_base_clamp + u_aa_feather, t) * step(0.001, path_mask);
+	float w1 = smoothstep(u_pos_split_1 - u_aa_feather, u_pos_split_1 + u_aa_feather, t);
+	float w2 = smoothstep(u_pos_split_2 - u_aa_feather, u_pos_split_2 + u_aa_feather, t);
+	float w3 = smoothstep(u_pos_split_3 - u_aa_feather, u_pos_split_3 + u_aa_feather, t);
+	
+	vec3 labyrinth_color = mix(u_color_1.rgb, u_color_2.rgb, w0);
+	labyrinth_color = mix(labyrinth_color, u_color_3.rgb, w1);
+	labyrinth_color = mix(labyrinth_color, u_color_4.rgb, w2);
+	labyrinth_color = mix(labyrinth_color, u_color_1.rgb, w3);
+	
+	float drop_shadow = 0.0;
+	if (mode < 2) {
+		drop_shadow = smoothstep(u_line_thickness + 0.12, u_line_thickness, distance_to_path) * 0.4;
+	}
+	
+	vec3 final_output = mix(u_color_1.rgb * (1.0 - drop_shadow), labyrinth_color, path_mask);
+	
+	return vec4(final_output, 1.0);
+}
+"""
+
+
+
+
+	
+const SRC_FRACTAL_MASTER: String = """
+uniform float u_render_mode = 0.0; // @label Fractal Type (0=Mandelbrot, 1=Julia Set) | @min 0.0 | @max 1.0 | @sens 1.0
+uniform float u_zoom = 1.0; // @label View: Zoom Scale | @min 0.1 | @max 10.0 | @sens 0.05
+uniform vec2 u_pan = vec2(0.0, 0.0); // @label View: Pan Vector (X/Y) | @min -2.0 | @max 2.0 | @sens 0.01
+uniform float u_max_iterations = 64.0; // @label Detail / Max Iterations | @min 16.0 | @max 250.0 | @sens 1.0
+uniform float u_palette_frequency = 2.5; // @label Color Density Loops | @min 0.2 | @max 8.0 | @sens 0.05
+uniform float u_color_cycle_speed = 0.3; // @label Color Cycle Speed | @min 0.0 | @max 3.0 | @sens 0.05
+
+// --- JULIA SEED ROOTS CONTROLS ---
+uniform vec2 u_julia_c = vec2(-0.7, 0.27015); // @label [S1 Only] Julia Complex Seed Constant | @min -2.0 | @max 2.0 | @sens 0.005
+uniform float u_animate_seed = 0.0; // @label [S1 Only] Orbit Seed over Time | @min 0.0 | @max 1.0 | @sens 1.0
+
+// --- 4-STAGE ADVANCED HIGH-FIDELITY GRADIENT CONTROLS ---
+uniform vec4 u_color_1 : source_color = vec4(0.02, 0.02, 0.05, 1.0); // @label Color Slot 1 (Inner core) | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_2 : source_color = vec4(0.5, 0.0, 0.25, 1.0); // @label Color Slot 2 (Mid-Low) | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_3 : source_color = vec4(1.0, 0.6, 0.0, 1.0); // @label Color Slot 3 (Mid-High) | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_4 : source_color = vec4(0.0, 1.0, 0.9, 1.0); // @label Color Slot 4 (Outer Crest) | @min 0 | @max 1 | @sens 0.02
+uniform float u_base_clamp = 0.05; // @label Banding Bounds 1 | @min 0.0 | @max 0.4 | @sens 0.01
+uniform float u_pos_split_1 = 0.25; // @label Banding Bounds 2 | @min 0.15 | @max 0.6 | @sens 0.01
+uniform float u_pos_split_2 = 0.50; // @label Banding Bounds 3 | @min 0.35 | @max 0.8 | @sens 0.01
+uniform float u_pos_split_3 = 0.85; // @label Banding Bounds 4 | @min 0.60 | @max 0.99 | @sens 0.01
+uniform float u_aa_feather = 0.03; // @label Color Blending Smoothness | @min 0.001 | @max 0.4 | @sens 0.01
+
+vec4 fx_fractal_master(vec2 uv) {
+	// Re-map the raw screen coordinates down to standard fractal search bounds (-2.0 to 2.0)
+	vec2 st = (uv - 0.5) * 3.0;
+	
+	// Apply exponential viewport compression and matrix offset translations safely
+	st *= (1.0 / max(u_zoom, 0.001));
+	st += u_pan;
+	
+	vec2 z = vec2(0.0);
+	vec2 c = vec2(0.0);
+	
+	int mode = int(floor(u_render_mode + 0.05));
+	
+	if (mode == 0) {
+		z = st;
+		c = st;
+	} else {
+		z = st;
+		c = u_julia_c;
+		
+		if (u_animate_seed > 0.5) {
+			c += vec2(sin(u_time * 0.3) * 0.15, cos(u_time * 0.25) * 0.15);
+		}
+	}
+	
+	float iter_reached = 0.0;
+	float max_i = floor(u_max_iterations);
+	
+	for (float i = 0.0; i < 250.0; i++) {
+		if (i >= max_i) break;
+		
+		float xtemp = z.x * z.x - z.y * z.y + c.x;
+		z.y = 2.0 * z.x * z.y + c.y;
+		z.x = xtemp;
+		
+		if (dot(z, z) > 4.0) {
+			iter_reached = i;
+			break;
+		}
+	}
+	
+	vec4 final_color = vec4(0.0);
+	
+	if (iter_reached >= max_i - 1.0) {
+		final_color = vec4(0.0, 0.0, 0.0, 1.0);
+	} else {
+		float log_zn = log(dot(z, z)) / 2.0;
+		float nu = log(log_zn / log(2.0)) / log(2.0);
+		float smooth_i = iter_reached + 1.0 - nu;
+		
+		// Drive color positions dynamically using depth score + dedicated color cycle speed clock
+		float t = fract(((smooth_i / max_i) * u_palette_frequency) + (u_time * u_color_cycle_speed));
+		
+		float w0 = smoothstep(u_base_clamp - u_aa_feather, u_base_clamp + u_aa_feather, t);
+		float w1 = smoothstep(u_pos_split_1 - u_aa_feather, u_pos_split_1 + u_aa_feather, t);
+		float w2 = smoothstep(u_pos_split_2 - u_aa_feather, u_pos_split_2 + u_aa_feather, t);
+		float w3 = smoothstep(u_pos_split_3 - u_aa_feather, u_pos_split_3 + u_aa_feather, t);
+		
+		vec3 ramp_color = mix(u_color_1.rgb, u_color_2.rgb, w0);
+		ramp_color = mix(ramp_color, u_color_3.rgb, w1);
+		ramp_color = mix(ramp_color, u_color_4.rgb, w2);
+		ramp_color = mix(ramp_color, u_color_1.rgb, w3);
+		
+		final_color = vec4(ramp_color, 1.0);
+	}
+	
+	return final_color;
+}
+"""
+
+
+
+
 const SRC_GYROID_MASTER: String = """
-uniform float u_render_mode = 0.0; // @label Style Select | @min 0.0 | @max 3.0 | @sens 1.0
-uniform vec2 u_maze_scale = vec2(6.0, 6.0); // @label Maze Scale | @min 1.0 | @max 24.0 | @sens 0.1
-uniform float u_complexity = 1.0; // @label Labyrinth Folding | @min 0.5 | @max 4.0 | @sens 0.05
-uniform float u_morph_speed = 0.3; // @label Morph Speed | @min 0.0 | @max 3.0 | @sens 0.05
+uniform float u_render_mode = 0.0; // @label Style Select (0=Maze, 1=Cosine, 2=Chrono, 3=Cyber) | @min 0.0 | @max 3.0 | @sens 1.0
+uniform vec2 u_maze_scale = vec2(6.0, 6.0); // @label Global: Maze Scale | @min 1.0 | @max 24.0 | @sens 0.1
+uniform float u_complexity = 1.0; // @label Global: Labyrinth Density | @min 0.5 | @max 4.0 | @sens 0.05
+uniform float u_morph_speed = 0.3; // @label Global: 3D Morph Speed | @min 0.0 | @max 3.0 | @sens 0.05
 
 // --- STYLE 0 (STATIC) & STYLE 2 (CHRONO) CONTROLS ---
-uniform float u_wall_thickness = 0.25; // @label Wall Thickness | @min 0.05 | @max 0.6 | @sens 0.01
-uniform vec4 u_color_background : source_color = vec4(0.02, 0.03, 0.05, 1.0); // @label Floor Color | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_walls : source_color = vec4(0.4, 0.2, 0.6, 1.0); // @label Wall Core Color | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_accents : source_color = vec4(0.0, 0.9, 0.6, 1.0); // @label Ridge Highlight | @min 0 | @max 1 | @sens 0.02
-uniform float u_color_morph_speed = 0.6; // @label Color Morph Speed | @min 0 | @max 4 | @sens 0.05
+uniform float u_wall_thickness = 0.25; // @label [S0+S2] Maze Wall Thickness | @min 0.05 | @max 0.6 | @sens 0.01
+uniform vec4 u_color_background : source_color = vec4(0.02, 0.03, 0.05, 1.0); // @label [S0+S2] Color: Floor Plates | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_walls : source_color = vec4(0.4, 0.2, 0.6, 1.0); // @label [S0+S2] Color: Wall Outlines | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_accents : source_color = vec4(0.0, 0.9, 0.6, 1.0); // @label [S0+S2] Color: Corridor Ridges | @min 0 | @max 1 | @sens 0.02
+uniform float u_color_morph_speed = 0.6; // @label [S2 Only] Color Morph Speed | @min 0 | @max 4 | @sens 0.05
 
 // --- STYLE 1 (COSINE) CONTROLS ---
-uniform float u_palette_frequency = 1.5; // @label Color Density | @min 0.2 | @max 5.0 | @sens 0.05
-uniform float u_color_cycle_speed = 0.4; // @label Color Cycle Speed | @min 0 | @max 3 | @sens 0.05
-uniform vec4 u_color_a : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label Wave Center | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_b : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label Wave Amplitude | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_c : source_color = vec4(1.0, 1.0, 1.0, 1.0); // @label Wave Frequency | @min 0 | @max 2 | @sens 0.02
-uniform vec4 u_color_d : source_color = vec4(0.3, 0.1, 0.5, 1.0); // @label Wave Phase | @min 0 | @max 1 | @sens 0.02
+uniform float u_palette_frequency = 1.5; // @label [S1 Only] Spectrum Density | @min 0.2 | @max 5.0 | @sens 0.05
+uniform float u_color_cycle_speed = 0.4; // @label [S1 Only] Spectrum Cycle Speed | @min 0 | @max 3 | @sens 0.05
+uniform vec4 u_color_a : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label [S1 Only] Spectrum Center | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_b : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label [S1 Only] Spectrum Amplitude | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_c : source_color = vec4(1.0, 1.0, 1.0, 1.0); // @label [S1 Only] Spectrum Frequency | @min 0 | @max 2 | @sens 0.02
+uniform vec4 u_color_d : source_color = vec4(0.3, 0.1, 0.5, 1.0); // @label [S1 Only] Spectrum Color Phase | @min 0 | @max 1 | @sens 0.02
 
 // --- STYLE 3 (CYBER) CONTROLS ---
-uniform float u_vein_density = 15.0; // @label Vein Density | @min 4 | @max 35 | @sens 0.5
-uniform float u_glow_sharpness = 0.82; // @label Glow Sharpness | @min 0.5 | @max 0.99 | @sens 0.01
-uniform vec4 u_color_base : source_color = vec4(0.01, 0.01, 0.03, 1.0); // @label Void Color | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_glow : source_color = vec4(0.1, 0.0, 0.25, 1.0); // @label Ambient Glow | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_pattern_color : source_color = vec4(0.0, 1.0, 0.5, 1.0); // @label Laser Filament | @min 0 | @max 1 | @sens 0.02
+uniform float u_vein_density = 15.0; // @label [S3 Only] Corridor Circuit Density | @min 4 | @max 35 | @sens 0.5
+uniform float u_glow_sharpness = 0.82; // @label [S3 Only] Circuit Glow Sharpness | @min 0.5 | @max 0.99 | @sens 0.01
+uniform vec4 u_color_base : source_color = vec4(0.01, 0.01, 0.03, 1.0); // @label [S3 Only] Color: Ambient Floor | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_glow : source_color = vec4(0.1, 0.0, 0.25, 1.0); // @label [S3 Only] Color: Wall Radiance | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_pattern_color : source_color = vec4(0.0, 1.0, 0.5, 1.0); // @label [S3 Only] Color: Laser Grid | @min 0 | @max 1 | @sens 0.02
 
 vec4 fx_gyroid_master(vec2 uv) {
 	vec2 p = (uv - 0.5) * u_maze_scale;
@@ -512,31 +953,31 @@ vec4 fx_gyroid_master(vec2 uv) {
 
 	
 const SRC_PLASMA_MASTER: String = """
-uniform float u_render_mode = 0.0; // @label Style Select | @min 0.0 | @max 3.0 | @sens 1.0
-uniform vec2 u_plasma_scale = vec2(4.0, 4.0); // @label Wave Scale | @min 1.0 | @max 16.0 | @sens 0.1
-uniform float u_plasma_speed = 1.0; // @label Wave Speed | @min 0.0 | @max 4.0 | @sens 0.05
-uniform float u_turbulence = 1.0; // @label Wave Complexity | @min 0.2 | @max 4.0 | @sens 0.05
+uniform float u_render_mode = 0.0; // @label Style Select (0=Static, 1=Cosine, 2=Chrono, 3=Cyber) | @min 0.0 | @max 3.0 | @sens 1.0
+uniform vec2 u_plasma_scale = vec2(4.0, 4.0); // @label Global: Wave Scale | @min 1.0 | @max 16.0 | @sens 0.1
+uniform float u_plasma_speed = 1.0; // @label Global: Wave Speed | @min 0.0 | @max 4.0 | @sens 0.05
+uniform float u_turbulence = 1.0; // @label Global: Wave Complexity | @min 0.2 | @max 4.0 | @sens 0.05
 
 // --- STYLE 0 (STATIC) & STYLE 2 (CHRONO) CONTROLS ---
-uniform vec4 u_color_trough : source_color = vec4(0.02, 0.0, 0.1, 1.0); // @label Wave Trough | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_slope : source_color = vec4(0.1, 0.4, 0.8, 1.0); // @label Wave Slope | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_crest : source_color = vec4(0.0, 1.0, 0.9, 1.0); // @label Wave Crest | @min 0 | @max 1 | @sens 0.02
-uniform float u_color_morph_speed = 0.7; // @label Color Morph Speed | @min 0 | @max 4 | @sens 0.05
+uniform vec4 u_color_trough : source_color = vec4(0.02, 0.0, 0.1, 1.0); // @label [S0+S2] Color: Wave Trough | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_slope : source_color = vec4(0.1, 0.4, 0.8, 1.0); // @label [S0+S2] Color: Wave Slope | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_crest : source_color = vec4(0.0, 1.0, 0.9, 1.0); // @label [S0+S2] Color: Wave Crest | @min 0 | @max 1 | @sens 0.02
+uniform float u_color_morph_speed = 0.7; // @label [S2 Only] Color Morph Speed | @min 0 | @max 4 | @sens 0.05
 
 // --- STYLE 1 (COSINE) CONTROLS ---
-uniform float u_palette_frequency = 2.0; // @label Color Density | @min 0.5 | @max 6.0 | @sens 0.05
-uniform float u_color_cycle_speed = 0.5; // @label Color Cycle Speed | @min 0 | @max 3 | @sens 0.05
-uniform vec4 u_color_a : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label Wave Center | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_b : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label Wave Amplitude | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_c : source_color = vec4(1.0, 1.0, 1.0, 1.0); // @label Wave Frequency | @min 0 | @max 2 | @sens 0.02
-uniform vec4 u_color_d : source_color = vec4(0.0, 0.33, 0.67, 1.0); // @label Wave Phase | @min 0 | @max 1 | @sens 0.02
+uniform float u_palette_frequency = 2.0; // @label [S1 Only] Wave Color Density | @min 0.5 | @max 6.0 | @sens 0.05
+uniform float u_color_cycle_speed = 0.5; // @label [S1 Only] Spectrum Cycle Speed | @min 0 | @max 3 | @sens 0.05
+uniform vec4 u_color_a : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label [S1 Only] Spectrum Center | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_b : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label [S1 Only] Spectrum Amplitude | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_c : source_color = vec4(1.0, 1.0, 1.0, 1.0); // @label [S1 Only] Spectrum Frequency | @min 0 | @max 2 | @sens 0.02
+uniform vec4 u_color_d : source_color = vec4(0.0, 0.33, 0.67, 1.0); // @label [S1 Only] Spectrum Color Phase | @min 0 | @max 1 | @sens 0.02
 
 // --- STYLE 3 (CYBER) CONTROLS ---
-uniform float u_vein_density = 14.0; // @label Pulse Density | @min 4.0 | @max 28.0 | @sens 0.5
-uniform float u_glow_sharpness = 0.84; // @label Glow Sharpness | @min 0.5 | @max 0.99 | @sens 0.01
-uniform vec4 u_color_base : source_color = vec4(0.01, 0.01, 0.03, 1.0); // @label Void Base | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_glow : source_color = vec4(0.0, 0.2, 0.15, 1.0); // @label Ambient Light | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_pattern_color : source_color = vec4(0.3, 1.0, 0.0, 1.0); // @label Neon Filament | @min 0 | @max 1 | @sens 0.02
+uniform float u_vein_density = 14.0; // @label [S3 Only] Ring Pulse Density | @min 4.0 | @max 28.0 | @sens 0.5
+uniform float u_glow_sharpness = 0.84; // @label [S3 Only] Filament Sharpness | @min 0.5 | @max 0.99 | @sens 0.01
+uniform vec4 u_color_base : source_color = vec4(0.01, 0.01, 0.03, 1.0); // @label [S3 Only] Color: Void Base | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_glow : source_color = vec4(0.0, 0.2, 0.15, 1.0); // @label [S3 Only] Color: Background Light | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_pattern_color : source_color = vec4(0.3, 1.0, 0.0, 1.0); // @label [S3 Only] Color: Neon Filament | @min 0 | @max 1 | @sens 0.02
 
 vec4 fx_plasma_master(vec2 uv) {
 	vec2 p = (uv - 0.5) * u_plasma_scale;
@@ -1388,32 +1829,33 @@ vec2 fx_polar_map(vec2 uv) {
 
 
 const SRC_VORONOI_MASTER: String = """
-uniform float u_render_mode = 0.0; // @label Style Select | @min 0.0 | @max 3.0 | @sens 1.0
-uniform vec2 u_cell_scale = vec2(5.0, 5.0); // @label Cell Scale | @min 1.0 | @max 20.0 | @sens 0.1
-uniform float u_jitter = 1.0; // @label Chaos / Jitter | @min 0.0 | @max 1.0 | @sens 0.05
-uniform float u_cell_speed = 0.5; // @label Cell Agitation | @min 0.0 | @max 3.0 | @sens 0.05
+uniform float u_render_mode = 0.0; // @label Style Select (0=Crystal, 1=Cosine, 2=Chrono, 3=Cyber) | @min 0.0 | @max 3.0 | @sens 1.0
+uniform vec2 u_cell_scale = vec2(5.0, 5.0); // @label Global: Cell Scale | @min 1.0 | @max 20.0 | @sens 0.1
+uniform float u_jitter = 1.0; // @label Global: Chaos / Jitter | @min 0.0 | @max 1.0 | @sens 0.05
+uniform float u_cell_speed = 0.5; // @label Global: Cell Agitation Speed | @min 0.0 | @max 3.0 | @sens 0.05
 
 // --- STYLE 0 (STATIC) & STYLE 2 (CHRONO) CONTROLS ---
-uniform float u_border_thickness = 0.04; // @label Border Thickness | @min 0.01 | @max 0.2 | @sens 0.005
-uniform vec4 u_color_cell_core : source_color = vec4(0.05, 0.25, 0.4, 1.0); // @label Cell Core Color | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_cell_edge : source_color = vec4(0.1, 0.6, 0.7, 1.0); // @label Cell Slopes | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_border : source_color = vec4(1.0, 0.95, 0.8, 1.0); // @label Crystal Borders | @min 0 | @max 1 | @sens 0.02
-uniform float u_color_morph_speed = 0.6; // @label Color Morph Speed | @min 0 | @max 4 | @sens 0.05
+uniform float u_border_thickness = 0.04; // @label [S0+S2] Border Thickness | @min 0.01 | @max 0.2 | @sens 0.005
+uniform vec4 u_color_cell_core : source_color = vec4(0.05, 0.25, 0.4, 1.0); // @label [S0+S2] Color: Cell Core | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_cell_edge : source_color = vec4(0.1, 0.6, 0.7, 1.0); // @label [S0+S2] Color: Cell Slopes | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_border : source_color = vec4(1.0, 0.95, 0.8, 1.0); // @label [S0+S2] Color: Crystal Borders | @min 0 | @max 1 | @sens 0.02
+uniform float u_color_morph_speed = 0.6; // @label [S2 Only] Color Morph Speed | @min 0 | @max 4 | @sens 0.05
 
 // --- STYLE 1 (COSINE) CONTROLS ---
-uniform float u_palette_frequency = 1.5; // @label Color Density | @min 0.2 | @max 5.0 | @sens 0.05
-uniform float u_color_cycle_speed = 0.4; // @label Color Cycle Speed | @min 0 | @max 3 | @sens 0.05
-uniform vec4 u_color_a : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label Wave Center | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_b : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label Wave Amplitude | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_c : source_color = vec4(1.0, 1.0, 1.0, 1.0); // @label Wave Frequency | @min 0 | @max 2 | @sens 0.02
-uniform vec4 u_color_d : source_color = vec4(0.0, 0.33, 0.67, 1.0); // @label Wave Phase | @min 0 | @max 1 | @sens 0.02
+uniform float u_palette_frequency = 1.5; // @label [S1 Only] Spectrum Density | @min 0.2 | @max 5.0 | @sens 0.05
+uniform float u_color_cycle_speed = 0.4; // @label [S1 Only] Spectrum Cycle Speed | @min 0 | @max 3 | @sens 0.05
+uniform vec4 u_color_a : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label [S1 Only] Spectrum Center | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_b : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label [S1 Only] Spectrum Amplitude | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_c : source_color = vec4(1.0, 1.0, 1.0, 1.0); // @label [S1 Only] Spectrum Frequency | @min 0 | @max 2 | @sens 0.02
+uniform vec4 u_color_d : source_color = vec4(0.0, 0.33, 0.67, 1.0); // @label [S1 Only] Spectrum Color Phase | @min 0 | @max 1 | @sens 0.02
 
 // --- STYLE 3 (CYBER) CONTROLS ---
-uniform float u_vein_density = 10.0; // @label Pulse Density | @min 4.0 | @max 25.0 | @sens 0.5
-uniform float u_glow_sharpness = 0.80; // @label Glow Sharpness | @min 0.5 | @max 0.99 | @sens 0.01
-uniform vec4 u_color_base : source_color = vec4(0.01, 0.01, 0.03, 1.0); // @label Cell Void Color | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_glow : source_color = vec4(0.2, 0.0, 0.1, 1.0); // @label Plate Radiance | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_pattern_color : source_color = vec4(1.0, 0.0, 0.4, 1.0); // @label Filament Laser | @min 0 | @max 1 | @sens 0.02
+uniform float u_vein_density = 10.0; // @label [S3 Only] Pulse Wave Density | @min 4.0 | @max 25.0 | @sens 0.5
+uniform float u_glow_sharpness = 0.80; // @label [S3 Only] Laser Line Sharpness | @min 0.5 | @max 0.99 | @sens 0.01
+uniform vec4 u_color_base : source_color = vec4(0.01, 0.01, 0.03, 1.0); // @label [S3 Only] Color: Cell Void | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_glow : source_color = vec4(0.2, 0.0, 0.1, 1.0); // @label [S3 Only] Color: Plate Radiance | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_pattern_color : source_color = vec4(1.0, 0.0, 0.4, 1.0); // @label [S3 Only] Color: Filament Laser | @min 0 | @max 1 | @sens 0.02
+
 
 // Cellular hash to place points randomly inside grids
 vec2 voronoi_hash2d(vec2 p) {
@@ -1502,41 +1944,42 @@ vec4 fx_voronoi_master(vec2 uv) {
 
 
 const SRC_FBM_MASTER: String = """
-uniform float u_render_mode = 0.0; // @label Style Select | @min 0.0 | @max 3.0 | @sens 1.0
-uniform vec2 u_warp_frequency = vec2(2.5, 2.5); // @label Warp Frequency | @min 0.1 | @max 12 | @sens 0.05
-uniform float u_warp_strength = 1.1; // @label Warp Strength | @min 0 | @max 4 | @sens 0.05
-uniform float u_noise_detail = 4.0; // @label Noise Detail | @min 1 | @max 5 | @sens 1
-uniform float u_flow_speed = 0.4; // @label Flow Speed | @min 0 | @max 3 | @sens 0.05
+uniform float u_render_mode = 0.0; // @label Style Select (0=Ramp, 1=Cosine, 2=Chrono, 3=Cyber) | @min 0.0 | @max 3.0 | @sens 1.0
+uniform vec2 u_warp_frequency = vec2(2.5, 2.5); // @label Global: Warp Frequency | @min 0.1 | @max 12 | @sens 0.05
+uniform float u_warp_strength = 1.1; // @label Global: Warp Strength | @min 0 | @max 4 | @sens 0.05
+uniform float u_noise_detail = 4.0; // @label Global: Noise Detail Octaves | @min 1 | @max 5 | @sens 1
+uniform float u_flow_speed = 0.4; // @label Global: Fluid Flow Speed | @min 0 | @max 3 | @sens 0.05
 
 // --- STYLE 0 (UPGRADED STATIC RAMP) CONTROLS ---
-uniform float u_palette_frequency = 1.0; // @label Color Density | @min 0.2 | @max 5.0 | @sens 0.05
-uniform vec4 u_color_1 : source_color = vec4(0.02, 0.02, 0.05, 1.0); // @label Color Slot 1 (Base) | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_2 : source_color = vec4(0.12, 0.0, 0.22, 1.0); // @label Color Slot 2 (Mid-Low) | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_3 : source_color = vec4(0.0, 0.5, 0.5, 1.0); // @label Color Slot 3 (Mid-High) | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_4 : source_color = vec4(0.1, 0.7, 0.9, 1.0); // @label Color Slot 4 (Crest) | @min 0 | @max 1 | @sens 0.02
-uniform float u_base_clamp = 0.10; // @label Base Color Solid Field | @min 0.0 | @max 0.4 | @sens 0.01
-uniform float u_pos_split_1 = 0.30; // @label Position Slot 2 | @min 0.15 | @max 0.6 | @sens 0.01
-uniform float u_pos_split_2 = 0.55; // @label Position Slot 3 | @min 0.35 | @max 0.8 | @sens 0.01
-uniform float u_pos_split_3 = 0.80; // @label Position Slot 4 | @min 0.60 | @max 0.99 | @sens 0.01
-uniform float u_aa_feather = 0.02; // @label Edge Smoothness | @min 0.001 | @max 0.4 | @sens 0.01
+uniform float u_palette_frequency = 1.0; // @label [S0 Only] Color Density Ring Loops | @min 0.2 | @max 5.0 | @sens 0.05
+uniform vec4 u_color_1 : source_color = vec4(0.02, 0.02, 0.05, 1.0); // @label [S0 Only] Color Slot 1 (Base) | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_2 : source_color = vec4(0.12, 0.0, 0.22, 1.0); // @label [S0 Only] Color Slot 2 (Mid-Low) | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_3 : source_color = vec4(0.0, 0.5, 0.5, 1.0); // @label [S0 Only] Color Slot 3 (Mid-High) | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_4 : source_color = vec4(0.1, 0.7, 0.9, 1.0); // @label [S0 Only] Color Slot 4 (Crest) | @min 0 | @max 1 | @sens 0.02
+uniform float u_base_clamp = 0.10; // @label [S0 Only] Solid Color Bounds 1 | @min 0.0 | @max 0.4 | @sens 0.01
+uniform float u_pos_split_1 = 0.30; // @label [S0 Only] Solid Color Bounds 2 | @min 0.15 | @max 0.6 | @sens 0.01
+uniform float u_pos_split_2 = 0.55; // @label [S0 Only] Solid Color Bounds 3 | @min 0.35 | @max 0.8 | @sens 0.01
+uniform float u_pos_split_3 = 0.80; // @label [S0 Only] Solid Color Bounds 4 | @min 0.60 | @max 0.99 | @sens 0.01
+uniform float u_aa_feather = 0.02; // @label [S0 Only] Band Edge Smoothness | @min 0.001 | @max 0.4 | @sens 0.01
 
 // --- STYLE 1 (COSINE PALETTE) CONTROLS ---
-uniform float u_color_cycle_speed = 0.5; // @label Color Cycle Speed | @min 0 | @max 3 | @sens 0.05
-uniform vec4 u_color_a : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label Wave Center | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_b : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label Wave Amplitude | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_c : source_color = vec4(1.0, 1.0, 1.0, 1.0); // @label Wave Frequency | @min 0 | @max 2 | @sens 0.02
-uniform vec4 u_color_d : source_color = vec4(0.0, 0.33, 0.67, 1.0); // @label Wave Phase | @min 0 | @max 1 | @sens 0.02
+uniform float u_color_cycle_speed = 0.5; // @label [S1 Only] Spectrum Cycle Speed | @min 0 | @max 3 | @sens 0.05
+uniform vec4 u_color_a : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label [S1 Only] Spectrum Center | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_b : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label [S1 Only] Spectrum Amplitude | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_c : source_color = vec4(1.0, 1.0, 1.0, 1.0); // @label [S1 Only] Spectrum Frequency | @min 0 | @max 2 | @sens 0.02
+uniform vec4 u_color_d : source_color = vec4(0.0, 0.33, 0.67, 1.0); // @label [S1 Only] Spectrum Color Phase | @min 0 | @max 1 | @sens 0.02
 
 // --- STYLE 2 (CHRONO MORPH) CONTROLS ---
-uniform float u_color_morph_speed = 0.5; // @label Color Morph Speed | @min 0 | @max 4 | @sens 0.05
-uniform vec4 u_color_base : source_color = vec4(0.02, 0.02, 0.05, 1.0); // @label Base Color | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_warp_q : source_color = vec4(0.12, 0.0, 0.22, 1.0); // @label Distortion Color A | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_warp_r : source_color = vec4(0.0, 0.5, 0.5, 1.0); // @label Distortion Color B | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_pattern_color : source_color = vec4(0.1, 0.7, 0.9, 1.0); // @label Highlight Color | @min 0 | @max 1 | @sens 0.02
+uniform float u_color_morph_speed = 0.5; // @label [S2 Only] Nebula Evolve Speed | @min 0 | @max 4 | @sens 0.05
+uniform vec4 u_color_base : source_color = vec4(0.02, 0.02, 0.05, 1.0); // @label [S2 Only] Color: Void Floor | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_warp_q : source_color = vec4(0.12, 0.0, 0.22, 1.0); // @label [S2 Only] Color: Shift Factor A | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_color_warp_r : source_color = vec4(0.0, 0.5, 0.5, 1.0); // @label [S2 Only] Color: Shift Factor B | @min 0 | @max 1 | @sens 0.02
+uniform vec4 u_pattern_color : source_color = vec4(0.1, 0.7, 0.9, 1.0); // @label [S2 Only] Color: Ridge Highlight | @min 0 | @max 1 | @sens 0.02
 
 // --- STYLE 3 (CYBER VEINS) CONTROLS ---
-uniform float u_vein_density = 12.0; // @label Vein Density | @min 4 | @max 30 | @sens 0.5
-uniform float u_glow_sharpness = 0.85; // @label Glow Sharpness | @min 0.5 | @max 0.99 | @sens 0.01
+uniform float u_vein_density = 12.0; // @label [S3 Only] Laser Ring Density | @min 4 | @max 30 | @sens 0.5
+uniform float u_glow_sharpness = 0.85; // @label [S3 Only] Laser Glow Sharpness | @min 0.5 | @max 0.99 | @sens 0.01
+
 
 float fbm_hash2d(vec2 p) { 
 	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); 

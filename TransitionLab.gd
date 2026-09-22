@@ -32,8 +32,10 @@ const HOLD_FRACTION: float = 0.18 # share of the transition spent holding the pe
 const SENS_DEFAULT_INDEX: int = 2
 const SCREENSAVER_DIR: String = "user://screensaver_presets"
 const NAME_MAX_LENGTH: int = 24
+const SETTINGS_PATH: String = "user://tatool_settings.cfg" # shared with OptionsMenu/ControllerLayout
+const HOLD_TIME_CHOICES: Array = [3.0, 4.0, 6.0, 8.0, 10.0, 15.0, 20.0, 30.0]
 
-enum M { FORMULAS, UNIFORMS, CHANNELS, TWEAK, LOAD_LIST }
+enum M { FORMULAS, UNIFORMS, CHANNELS, TWEAK, LOAD_LIST, CONFIRM_DELETE }
 
 var main
 var owner_menu
@@ -86,6 +88,9 @@ var _name_edit = null
 var _load_entries: Array = []
 var _load_cursor: int = 0
 
+# How long Screensaver Mode holds on a preset before starting the next transition (ScreensaverMode.gd reads this)
+var hold_seconds: float = 6.0
+
 var _re_uniform: RegEx
 
 
@@ -99,6 +104,7 @@ func setup(main_manager, owner_options: Object) -> void:
 	# groups: 1 type, 2 name, 3 hint, 4 default literal, 5 comment tags
 	_re_uniform.compile("^\\s*uniform\\s+(float|vec2|vec4)\\s+(\\w+)\\s*(?::\\s*([^=;]+?))?\\s*=\\s*([^;]+);\\s*(?://(.*))?$")
 	_register_formulas()
+	_load_hold_time()
 	set_process(false)
 
 	_host = main.canvas_container.get_parent()
@@ -585,6 +591,29 @@ func _end_typing() -> void:
 	if was_typing and owner_menu != null:
 		owner_menu.notify_typing_done() # the keyboard may have resized the window; re-check the layout
 
+## Steps through HOLD_TIME_CHOICES and wraps around; saved immediately so it survives a restart.
+func _cycle_hold_time(step: int) -> void:
+	var idx: int = HOLD_TIME_CHOICES.find(hold_seconds)
+	if idx == -1:
+		idx = HOLD_TIME_CHOICES.find(6.0)
+	idx = posmod(idx + step, HOLD_TIME_CHOICES.size())
+	hold_seconds = HOLD_TIME_CHOICES[idx]
+	_save_hold_time()
+
+func _load_hold_time() -> void:
+	var cfg := ConfigFile.new()
+	if cfg.load(SETTINGS_PATH) != OK:
+		return
+	var v: float = float(cfg.get_value("screensaver", "hold_seconds", hold_seconds))
+	if HOLD_TIME_CHOICES.has(v):
+		hold_seconds = v
+
+func _save_hold_time() -> void:
+	var cfg := ConfigFile.new()
+	cfg.load(SETTINGS_PATH)
+	cfg.set_value("screensaver", "hold_seconds", hold_seconds)
+	cfg.save(SETTINGS_PATH)
+
 func _scan_names() -> Array:
 	var out: Array = []
 	for e in _scan_transition_presets():
@@ -722,7 +751,7 @@ func handle_vertical(step: int) -> void:
 		return
 	match mode:
 		M.FORMULAS:
-			_cursor_formula = posmod(_cursor_formula + step, _formula_ids().size() + 2)
+			_cursor_formula = posmod(_cursor_formula + step, _formula_ids().size() + 3)
 		M.UNIFORMS:
 			_cursor_uniform = posmod(_cursor_uniform + step, _uniforms_of(_formula_id).size() + 1)
 		M.CHANNELS:
@@ -734,8 +763,20 @@ func handle_vertical(step: int) -> void:
 				_load_cursor = posmod(_load_cursor + step, _load_entries.size())
 	redraw()
 
+## In the load list, left / right asks to delete the highlighted preset (same as the animation Load list).
 func handle_horizontal(step: int) -> void:
-	if saving or mode != M.TWEAK:
+	if saving:
+		return
+	if mode == M.FORMULAS and _cursor_formula == _formula_ids().size() + 1:
+		_cycle_hold_time(step)
+		redraw()
+		return
+	if mode == M.LOAD_LIST:
+		if not _load_entries.is_empty():
+			mode = M.CONFIRM_DELETE
+			redraw()
+		return
+	if mode != M.TWEAK:
 		return
 	var rec: Dictionary = _uniforms_of(_formula_id)[_uniform_idx]
 	var ladder: Array = _ladder(rec)
@@ -762,6 +803,9 @@ func handle_a() -> void:
 				# [ LOAD TRANSITION PRESET ]
 				_open_load_list()
 			elif _cursor_formula == ids.size() + 1:
+				# SCREENSAVER HOLD TIME
+				_cycle_hold_time(1)
+			elif _cursor_formula == ids.size() + 2:
 				# [ REMOVE ALL FORMULAS ]
 				active.clear()
 				peak_values.clear()
@@ -798,6 +842,13 @@ func handle_a() -> void:
 				_load_transition_preset(_load_entries[_load_cursor])
 				mode = M.FORMULAS
 				_cursor_formula = 0
+		M.CONFIRM_DELETE:
+			var entry: Dictionary = _load_entries[_load_cursor]
+			DirAccess.remove_absolute(entry["file"])
+			_load_entries = _scan_transition_presets()
+			_load_cursor = clampi(_load_cursor, 0, maxi(_load_entries.size() - 1, 0))
+			mode = M.LOAD_LIST
+			_say("DELETED")
 	redraw()
 
 func _enter_tweak(rec: Dictionary) -> void:
@@ -821,6 +872,8 @@ func handle_b() -> bool:
 			mode = M.FORMULAS
 		M.LOAD_LIST:
 			mode = M.FORMULAS
+		M.CONFIRM_DELETE:
+			mode = M.LOAD_LIST
 		M.FORMULAS:
 			_close_menu()
 			return false
@@ -855,6 +908,8 @@ func redraw() -> void:
 			_draw_tweak()
 		M.LOAD_LIST:
 			_draw_load_list()
+		M.CONFIRM_DELETE:
+			_draw_confirm_delete()
 
 func _add_label(text: String, color: Color) -> void:
 	var lbl := Label.new()
@@ -878,9 +933,15 @@ func _draw_formulas() -> void:
 	var rows: Array = []
 	for id in _formula_ids():
 		rows.append(("● " if active.has(id) else "○ ") + String(formulas[id]["name"]))
+	var load_idx: int = rows.size()
 	rows.append("[ LOAD TRANSITION PRESET ]")
+	var hold_idx: int = rows.size()
+	rows.append("SCREENSAVER HOLD TIME  [ %d S ]" % int(hold_seconds))
+	var remove_idx: int = rows.size()
 	rows.append("[ REMOVE ALL FORMULAS ]")
-	_draw_window(rows, _cursor_formula, [rows.size() - 2, rows.size() - 1])
+	_draw_window(rows, _cursor_formula, [load_idx, remove_idx])
+	if _cursor_formula == hold_idx:
+		_add_label(" ◄ ► CHANGE   (USED BY SCREENSAVER MODE) ", Color.DIM_GRAY)
 
 func _draw_uniforms() -> void:
 	_add_label(" 🌀 %s " % String(formulas[_formula_id]["name"]), Color.CYAN)
@@ -931,6 +992,12 @@ func _draw_load_list() -> void:
 	for e in _load_entries:
 		names.append(String(e["name"]))
 	_draw_window(names, _load_cursor, [])
+	_add_label(" ✔️ = LOADS    ◄ ► DELETES ", Color.DIM_GRAY)
+
+func _draw_confirm_delete() -> void:
+	_add_label(" DELETE THIS TRANSITION? ", Color.ORANGE)
+	_add_label(String(_load_entries[_load_cursor]["name"]), Color.WHITE)
+	_add_label(" ✔️ = YES, DELETE    ❌ = CANCEL ", Color.YELLOW)
 
 func _draw_tweak() -> void:
 	var rec: Dictionary = _uniforms_of(_formula_id)[_uniform_idx]

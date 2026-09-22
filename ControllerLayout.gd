@@ -21,14 +21,18 @@ const COLUMNS: int = 5
 const ROWS: int = 5
 const GRID_GAP: int = 4 # pixels between cells
 
-const ALL_IDS: Array = ["a", "b", "quick", "main", "up", "down", "left", "right"]
+const ALL_IDS: Array = ["a", "b", "quick", "main", "up", "down", "left", "right", "vram"]
 const BUTTON_NAMES: Dictionary = {
 	"a": "A BUTTON", "b": "B BUTTON", "quick": "QUICK MENU BUTTON", "main": "MAIN MENU BUTTON",
 	"up": "UP BUTTON", "down": "DOWN BUTTON", "left": "LEFT BUTTON", "right": "RIGHT BUTTON",
+	"vram": "VRAM DISPLAY BUTTON",
 }
-# The previous 3 x 5 look, centered in the wider grid
-const DEFAULT_POS: Dictionary = {"a": 1, "quick": 3, "b": 21, "main": 23, "up": 7, "left": 11, "right": 13, "down": 17}
+# The previous 3 x 5 look, centered in the wider grid. "vram" defaults to the otherwise-unused center cell.
+const DEFAULT_POS: Dictionary = {"a": 1, "quick": 3, "b": 21, "main": 23, "up": 7, "left": 11, "right": 13, "down": 17, "vram": 12}
 const ORIENT_MODE_NAMES: Array = ["AUTO", "LANDSCAPE", "PORTRAIT"]
+const GRID_FIT_MARGIN: float = 0.92 # shrink the fit slightly so the grid never touches the edges
+const GRID_MIN_SCALE: float = 0.4   # smallest the grid will shrink to on a very small window
+const GRID_MAX_SCALE: float = 2.5   # largest it will grow to on a large window/tablet
 
 var main         # MainManager
 var owner_menu   # OptionsMenu
@@ -51,6 +55,12 @@ var _std_host_vflag: int = 0
 var _spare_label              # the old center readout, kept alive but out of the tree
 var _edit_orient: int = 0
 var _edit_snapshot: Dictionary = {}
+
+# Grid scaling: the grid keeps its tuned proportions and just scales as a whole to fit whatever
+# room the controls area actually has, so it never gets cut off on a small window and grows to fill
+# a large one. _grid_natural_size is the grid at its original, unscaled size (cell size x 5, plus gaps).
+var _wrapper: Control
+var _grid_natural_size: Vector2 = Vector2.ZERO
 
 
 func _default_config() -> Dictionary:
@@ -81,6 +91,7 @@ func _capture() -> void:
 		"quick": main.btn_select_pass, "main": main.btn_shader_menu,
 		"up": cp.btn_param_up, "down": cp.btn_param_down,
 		"left": cp.btn_channel_prev, "right": cp.btn_channel_next,
+		"vram": _make_vram_button(),
 	}
 	for id in found:
 		if found[id] == null:
@@ -117,8 +128,11 @@ func _capture() -> void:
 	cp.add_child(center)
 	var wrapper := Control.new()
 	wrapper.custom_minimum_size = grid_size
+	wrapper.pivot_offset = grid_size * 0.5 # scale around its own center, so it stays centered in cp at any scale
 	wrapper.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	center.add_child(wrapper)
+	_wrapper = wrapper
+	_grid_natural_size = grid_size
 	var grid := GridContainer.new()
 	grid.columns = COLUMNS
 	grid.add_theme_constant_override("h_separation", GRID_GAP)
@@ -136,6 +150,11 @@ func _capture() -> void:
 	wrapper.add_child(_overlay)
 	_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_overlay.setup(self)
+
+	# cp's actual size is only known once containers finish laying out, so scale from its "resized"
+	# signal rather than trying to read it here; update once now too, in case it is already settled.
+	cp.resized.connect(_update_grid_scale)
+	_update_grid_scale()
 
 	# Buttons out of the old containers and into cells (real positions are set by relayout())
 	for i in range(ALL_IDS.size()):
@@ -166,6 +185,16 @@ func _capture() -> void:
 	main.pass2_material.set_shader_parameter("u_pattern_texture", main.pass1_viewport.get_texture())
 	main.pass3_material.set_shader_parameter("u_warped_texture", main.pass2_viewport.get_texture())
 	ready_ok = true
+
+## The VRAM display button has no pre-existing counterpart in your layout code, so it is built here,
+## sized to match the other buttons, and wired straight to MainManager's toggle_vram_display().
+func _make_vram_button() -> Button:
+	var btn := Button.new()
+	btn.text = "❤️"
+	btn.custom_minimum_size = Vector2(96, 96)
+	btn.add_theme_font_size_override("font_size", 28)
+	btn.pressed.connect(main.toggle_vram_display)
+	return btn
 
 func _place(btn: Control, holder: Control) -> void:
 	if btn.get_parent() == holder:
@@ -251,6 +280,19 @@ func relayout() -> void:
 	for rect in [main.pass1_rect, main.pass2_rect, main.pass3_rect]:
 		rect.custom_minimum_size = Vector2(side, side)
 		rect.size = Vector2(side, side)
+
+## Scales the whole grid uniformly to fit the controls area's current size, shrinking on a small
+## window and growing on a large one. The grid's own proportions (cell size, gaps) never change --
+## only this one overall scale factor does, so nothing about placing buttons in cells is affected.
+func _update_grid_scale() -> void:
+	if _wrapper == null or _grid_natural_size.x <= 0.0 or _grid_natural_size.y <= 0.0:
+		return
+	var avail: Vector2 = _cp.size
+	if avail.x <= 0.0 or avail.y <= 0.0:
+		return # cp has not been sized by its container yet
+	var s: float = minf(avail.x / _grid_natural_size.x, avail.y / _grid_natural_size.y) * GRID_FIT_MARGIN
+	s = clampf(s, GRID_MIN_SCALE, GRID_MAX_SCALE)
+	_wrapper.scale = Vector2(s, s)
 
 func _icon_state(cfg: Dictionary, id: String) -> Array:
 	return cfg["icons"].get(id, [0, false])

@@ -1,15 +1,14 @@
 extends Node
 ## ScreensaverMode.gd -- "Screensaver Mode" (System Main Menu > START SCREENSAVER)
 ##
-## Runs on its own with no input: it picks a random saved animation preset, holds on it, then picks a
+## Runs on its own with no input: it picks a random saved animation preset, holds on it (for however
+## long TransitionLab.hold_seconds is set to -- adjustable in the Screensaver Dev OPT menu), then picks a
 ## random saved TRANSITION preset (from TransitionLab / "Screensaver Dev") and uses it to transition to
 ## another random animation preset, repeating forever. A tap anywhere on screen stops it and restores
 ## whatever was on screen before it started.
 ##
 ## Needs at least 2 saved animation presets and at least 1 saved transition preset; START SCREENSAVER
 ## shows a message and does nothing if there aren't enough of either yet.
-
-const HOLD_SECONDS: float = 6.0 # how long a preset stays fully visible before the next transition begins
 
 var main         # MainManager
 var owner_menu   # OptionsMenu (for .presets and .lab)
@@ -104,7 +103,7 @@ func stop() -> void:
 func _on_transition_finished() -> void:
 	if not running:
 		return
-	_hold_timer = main.get_tree().create_timer(HOLD_SECONDS)
+	_hold_timer = main.get_tree().create_timer(owner_menu.lab.hold_seconds)
 	_hold_timer.timeout.connect(_advance)
 
 ## Picks a random next preset (never the one on screen now) and a random transition to reach it.
