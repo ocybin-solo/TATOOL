@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="Trippy Animation Tool"
-config/version="1.8"
+config/version="1.9"
 run/main_scene="uid://bcnt88dwpdalh"
 config/features=PackedStringArray("4.7", "Mobile")
 config/icon="uid://bbwsqx4qsaymw"
