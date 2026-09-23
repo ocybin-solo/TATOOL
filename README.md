@@ -22,8 +22,8 @@ sorta rolls funny off of the tongue, so...
 **KEY INFORMATION**
 
 * In the 🎛 Labs, you can only choose ONE base pattern, or ONE filter
-* You can choose any number of EFFECTS in "pass 2", and they stack
-	* For example, if you add a swirl effect before a kaleidoscope, it would be appear differnt than adding a kaleidoscope before a swirl
+* You can choose any number of EFFECTS in "pass 2", and they stack on top of one another
+	* Example, if you add a swirl effect before a kaleidoscope, it would be appear different than adding a kaleidoscope before a swirl
 * You can customize your button layout & background colors, those option are inside of ⚙️ 
 
 

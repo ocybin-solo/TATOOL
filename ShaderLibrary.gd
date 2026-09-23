@@ -399,7 +399,7 @@ func _register_builtin_recipes() -> void:
 
 	# shadertoy open sourced patterns
 	_register("hairy_infinity", PASS_PATTERN, "S.TOY/NR4s HAIRY INFINITY", SRC_HAIRY_INFINITY, false)
-	
+
 	
 	
 	#######  PASS 2 ########### (Warp Modules) - This Pass alone lets you add more than one at a time!
@@ -428,11 +428,14 @@ func _register_builtin_recipes() -> void:
 	_register("neon_blur", PASS_FILTER, "🔮 NEON GLOW BLUR", SRC_NEON_BLUR, false)
 	_register("fxaa_filter", PASS_FILTER, "✨ FXAA ANTI-ALIASING LENS", SRC_FXAA_FILTER, false)
 
+
+
+
 const SRC_THAT_INTRO: String = """
-uniform float u_render_mode = 0.0; // @label Unfold Style (0=Chunky Block Pop, 1=Smooth Digital Sweep) | @min 0.0 | @max 1.0 | @sens 1.0
-uniform float u_draw_progress = 0.15; // @label Draw Progress (0=Auto Loop, 1=Manual Full) | @min 0.0 | @max 1.0 | @sens 0.01
-uniform float u_grid_thickness = 0.08; // @label Inner Block Bevel | @min 0.01 | @max 0.25 | @sens 0.01
-uniform float u_min_silhouette = 0.12; // @label Persistent Grid Glow | @min 0.0 | @max 0.4 | @sens 0.01
+uniform float u_render_mode = 0.0; // @label Unfold Style (0=Chunky Block Pop, 1=Smooth Digital Sweep) | @min -1.0 | @max 1.0 | @sens 1.0
+uniform float u_draw_progress = 0.15; // @label Draw Progress (0=Auto Loop, 1=Manual Full) | @min -1.0 | @max 1.0 | @sens 0.01
+uniform float u_grid_thickness = 0.08; // @label Inner Block Bevel | @min -1.01 | @max 1.25 | @sens 0.01
+uniform float u_min_silhouette = 0.12; // @label Persistent Grid Glow | @min -1.0 | @max 1.5 | @sens 0.01
 
 // --- 4-STAGE ADVANCED HIGH-FIDELITY GRADIENT CONTROLS ---
 uniform float u_palette_frequency = 2.3; // @label Color Density Loops | @min 0.2 | @max 5.0 | @sens 0.05
@@ -554,10 +557,10 @@ vec4 fx_that_intro(vec2 uv) {
 
 const SRC_SPIRO_MASTER: String = """
 uniform float u_render_mode = 0.0; // @label Geometry Style (0=Spirograph Gear, 1=Sacred Star Poly) | @min 0.0 | @max 1.0 | @sens 1.0
-uniform float u_complexity = 6.0; // @label Geometric Petal Count | @min 2.0 | @max 24.0 | @sens 1.0
-uniform float u_gear_ratio = 1.67; // @label [S0 Only] Inner/Outer Gear Ratio | @min 0.2 | @max 5.0 | @sens 0.01
-uniform float u_line_thickness = 0.08; // @label Line Width / Intensity | @min 0.01 | @max 0.35 | @sens 0.005
-uniform float u_spin_speed = 0.2; // @label Rotation Speed | @min -2.0 | @max 2.0 | @sens 0.05
+uniform float u_complexity = 6.0; // @label Geometric Petal Count | @min 0.0 | @max 24.0 | @sens 1.0
+uniform float u_gear_ratio = 1.67; // @label [S0 Only] Inner/Outer Gear Ratio | @min -10.0 | @max 15.0 | @sens 0.01
+uniform float u_line_thickness = 0.08; // @label Line Width / Intensity | @min 0.00 | @max 5.35 | @sens 0.005
+uniform float u_spin_speed = 0.2; // @label Rotation Speed | @min -5.0 | @max 5.0 | @sens 0.05
 uniform float u_pulse_speed = 0.4; // @label Color Flow Speed | @min -3.0 | @max 3.0 | @sens 0.05
 
 // --- 4-STAGE ADVANCED HIGH-FIDELITY GRADIENT CONTROLS ---
