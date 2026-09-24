@@ -5,16 +5,23 @@ extends RefCounted
 ##   uniform float u_segments = 6.0; // @label Slides | @min 1 | @max 32 | @sens 1
 ##   @label    text shown in the menus
 ##   @min/@max allowed range (used for clamping and to derive a fallback sensitivity)
-##   @sens     recommended sensitivity (Tier 5 "recommended" row)
-##   @channels comma list overriding the default channel names (X,Y / R,G,B,A)
+##   @sens     recommended sensitivity (Tier 5 "recommended" row) -- ignored for bool, which just toggles
+##   @channels comma list overriding the default channel names (X,Y / X,Y,Z / R,G,B,A)
 ##   @global   shared by the whole pass: declared once, value survives formula changes
+##   @style N  (int uniform only) this uniform only shows in the menu when the recipe's @is_style
+##             uniform currently equals N. Comma-separate several: "@style 0,2". No @style tag = always shown.
+##   @is_style marks an int uniform as the one Tier 3 reads to decide which @style N group is visible.
+##             One per recipe; give it real names via @label, e.g. "0=Ramp,1=Cosine,2=Chrono,3=Cyber".
 ##
 ## RECIPE CONVENTIONS (function must be named fx_<id>; helper functions should start with <id>_):
 ##   Pass 1 (pattern):  vec4 fx_<id>(vec2 uv)   single-select
 ##   Pass 2 (warp):     vec2 fx_<id>(vec2 uv)   stackable, chained in the order added
 ##   Pass 3 (filter):   vec4 fx_<id>(vec2 uv)   single-select for now, may sample u_warped_texture
 ## Recipes may read u_time. Never declare samplers or u_time; the assembler adds them.
-## Supported uniform types for now: float, vec2, vec4 (vec4 is treated as a Color).
+## Supported uniform types: float, int, bool, vec2, vec3, vec4 (vec4 is treated as a Color). int and
+## bool are REAL GLSL int/bool uniforms in the assembled shader -- write "int mode = ..." directly
+## in your recipe's function body and compare it against real integers; no more float-into-int hacks
+## like int(floor(u_render_mode + 0.05)).
 
 const PASS_PATTERN: int = 0
 const PASS_WARP: int = 1
@@ -29,7 +36,7 @@ var _re_uniform: RegEx
 func _init() -> void:
 	_re_uniform = RegEx.new()
 	# groups: 1 type, 2 name, 3 hint (e.g. source_color), 4 default literal, 5 comment tags
-	_re_uniform.compile("^\\s*uniform\\s+(float|vec2|vec4)\\s+(\\w+)\\s*(?::\\s*([^=;]+?))?\\s*=\\s*([^;]+);\\s*(?://(.*))?$")
+	_re_uniform.compile("^\\s*uniform\\s+(float|int|bool|vec2|vec3|vec4)\\s+(\\w+)\\s*(?::\\s*([^=;]+?))?\\s*=\\s*([^;]+);\\s*(?://(.*))?$")
 	_register_builtin_recipes()
 
 
@@ -217,7 +224,12 @@ func _decl_line(rec: Dictionary) -> String:
 	var hint: String = ""
 	if rec["hint"] != "":
 		hint = " : %s" % rec["hint"]
-	return "uniform %s %s%s = %s;" % [rec["type"], rec["name"], hint, rec["literal"]]
+	var literal: String = rec["literal"]
+	if rec["type"] == "int":
+		literal = str(int(round(float(rec["default"]))))
+	elif rec["type"] == "bool":
+		literal = "true" if bool(rec["default"]) else "false"
+	return "uniform %s %s%s = %s;" % [rec["type"], rec["name"], hint, literal]
 
 
 # =========================================================================
@@ -243,6 +255,8 @@ func _parse_uniform_line(line: String, recipe_id: String) -> Dictionary:
 	var channels: PackedStringArray = PackedStringArray(["VALUE"])
 	if type == "vec2":
 		channels = PackedStringArray(["X", "Y"])
+	elif type == "vec3":
+		channels = PackedStringArray(["X", "Y", "Z"])
 	elif type == "vec4":
 		channels = PackedStringArray(["R", "G", "B", "A"])
 	if tags.has("channels"):
@@ -264,8 +278,20 @@ func _parse_uniform_line(line: String, recipe_id: String) -> Dictionary:
 		"sens": sens,               # recommended sensitivity
 		"channels": channels,
 		"is_global": tags.has("global"),
+		"is_style": tags.has("is_style"),
+		"styles": _parse_styles(tags),   # empty Array = shown for every style (or not style-gated at all)
 	}
 
+
+## "@style 0,2" -> [0, 2]. No @style tag -> [] (always shown).
+func _parse_styles(tags: Dictionary) -> Array:
+	if not tags.has("style"):
+		return []
+	var out: Array = []
+	for s in String(tags["style"]).split(","):
+		if s.strip_edges().is_valid_int():
+			out.append(int(s.strip_edges()))
+	return out
 
 func _parse_tags(comment: String) -> Dictionary:
 	var tags: Dictionary = {}
@@ -286,6 +312,10 @@ func _parse_literal(type: String, text: String) -> Variant:
 	var t: String = text.strip_edges()
 	if type == "float":
 		return float(t)
+	if type == "int":
+		return int(round(float(t))) if t.is_valid_float() or t.is_valid_int() else 0
+	if type == "bool":
+		return t == "true"
 	var nums: Array = []
 	var open: int = t.find("(")
 	var close: int = t.rfind(")")
@@ -298,6 +328,12 @@ func _parse_literal(type: String, text: String) -> Variant:
 		while nums.size() < 2:
 			nums.append(0.0)
 		return Vector2(nums[0], nums[1])
+	if type == "vec3":
+		if nums.size() == 1:
+			for _i in range(2): nums.append(nums[0])
+		while nums.size() < 3:
+			nums.append(0.0)
+		return Vector3(nums[0], nums[1], nums[2])
 	if nums.size() == 1:
 		return Color(nums[0], nums[0], nums[0], nums[0])
 	while nums.size() < 4:
@@ -317,9 +353,14 @@ func get_component(value: Variant, type: String, idx: int) -> float:
 		"vec2":
 			var v2: Vector2 = value
 			return v2[idx]
+		"vec3":
+			var v3: Vector3 = value
+			return v3[idx]
 		"vec4":
 			var c4: Color = value
 			return c4[idx]
+		"bool":
+			return 1.0 if bool(value) else 0.0
 	return float(value)
 
 func set_component(value: Variant, type: String, idx: int, v: float) -> Variant:
@@ -328,13 +369,23 @@ func set_component(value: Variant, type: String, idx: int, v: float) -> Variant:
 			var v2: Vector2 = value
 			v2[idx] = v
 			return v2
+		"vec3":
+			var v3: Vector3 = value
+			v3[idx] = v
+			return v3
 		"vec4":
 			var c4: Color = value
 			c4[idx] = v
 			return c4
+		"int":
+			return int(round(v))
+		"bool":
+			return v > 0.5 # a toggle should call this with 1.0/0.0; a stepped +/- also flips it either way
 	return v
 
 func clamp_component(rec: Dictionary, v: float) -> float:
+	if rec["type"] == "bool":
+		return 1.0 if v > 0.5 else 0.0
 	return clampf(v, rec["min"], rec["max"])
 
 ## Default value of one channel (Tier 5 "default" row).
@@ -378,6 +429,27 @@ func global_uniforms(records: Array) -> Array:
 		if rec["is_global"]:
 			out.append(rec)
 	return out
+
+## Tier 3 list for a formula, but with any @style-gated uniform hidden unless it belongs to the
+## formula's CURRENT style (read from its @is_style uniform in `values`). A formula with no
+## @is_style uniform behaves exactly like uniforms_for_recipe() -- nothing is filtered out.
+func visible_uniforms(records: Array, recipe_id: String, values: Dictionary) -> Array:
+	var all: Array = uniforms_for_recipe(records, recipe_id)
+	var style_val: int = _current_style(all, values)
+	if style_val == -1:
+		return all # no @is_style uniform in this recipe: nothing to filter
+	var out: Array = []
+	for rec in all:
+		if rec["styles"].is_empty() or rec["styles"].has(style_val):
+			out.append(rec)
+	return out
+
+## The current value of a recipe's @is_style uniform, or -1 if it does not have one.
+func _current_style(recipe_uniforms: Array, values: Dictionary) -> int:
+	for rec in recipe_uniforms:
+		if rec["is_style"]:
+			return int(values.get(rec["name"], rec["default"]))
+	return -1
 
 
 # =========================================================================
@@ -560,7 +632,7 @@ uniform float u_render_mode = 0.0; // @label Geometry Style (0=Spirograph Gear, 
 uniform float u_complexity = 6.0; // @label Geometric Petal Count | @min 0.0 | @max 24.0 | @sens 1.0
 uniform float u_gear_ratio = 1.67; // @label [S0 Only] Inner/Outer Gear Ratio | @min -10.0 | @max 15.0 | @sens 0.01
 uniform float u_line_thickness = 0.08; // @label Line Width / Intensity | @min 0.00 | @max 5.35 | @sens 0.005
-uniform float u_spin_speed = 0.2; // @label Rotation Speed | @min -5.0 | @max 5.0 | @sens 0.05
+uniform float u_spin_speed = 0.0; // @label Rotation Speed | @min -5.0 | @max 5.0 | @sens 0.05
 uniform float u_pulse_speed = 0.4; // @label Color Flow Speed | @min -3.0 | @max 3.0 | @sens 0.05
 
 // --- 4-STAGE ADVANCED HIGH-FIDELITY GRADIENT CONTROLS ---
@@ -869,32 +941,32 @@ vec4 fx_fractal_master(vec2 uv) {
 
 
 const SRC_GYROID_MASTER: String = """
-uniform float u_render_mode = 0.0; // @label Style Select (0=Maze, 1=Cosine, 2=Chrono, 3=Cyber) | @min 0.0 | @max 3.0 | @sens 1.0
-uniform vec2 u_maze_scale = vec2(6.0, 6.0); // @label Global: Maze Scale | @min 1.0 | @max 24.0 | @sens 0.1
-uniform float u_complexity = 1.0; // @label Global: Labyrinth Density | @min 0.5 | @max 4.0 | @sens 0.05
-uniform float u_morph_speed = 0.3; // @label Global: 3D Morph Speed | @min 0.0 | @max 3.0 | @sens 0.05
+uniform int u_render_mode = 0; // @label Style Select (0=Maze, 1=Cosine, 2=Chrono, 3=Cyber) | @min 0 | @max 3 | @sens 1 | @is_style
+uniform vec2 u_maze_scale = vec2(6.0, 6.0); // @label Global: Maze Scale | @min 0.5 | @max 40.0 | @sens 0.5
+uniform float u_complexity = 1.0; // @label Global: Labyrinth Density | @min 0.1 | @max 8.0 | @sens 0.5
+uniform float u_morph_speed = 0.3; // @label Global: 3D Morph Speed | @min 0.0 | @max 6.0 | @sens 0.5
 
 // --- STYLE 0 (STATIC) & STYLE 2 (CHRONO) CONTROLS ---
-uniform float u_wall_thickness = 0.25; // @label [S0+S2] Maze Wall Thickness | @min 0.05 | @max 0.6 | @sens 0.01
-uniform vec4 u_color_background : source_color = vec4(0.02, 0.03, 0.05, 1.0); // @label [S0+S2] Color: Floor Plates | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_walls : source_color = vec4(0.4, 0.2, 0.6, 1.0); // @label [S0+S2] Color: Wall Outlines | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_accents : source_color = vec4(0.0, 0.9, 0.6, 1.0); // @label [S0+S2] Color: Corridor Ridges | @min 0 | @max 1 | @sens 0.02
-uniform float u_color_morph_speed = 0.6; // @label [S2 Only] Color Morph Speed | @min 0 | @max 4 | @sens 0.05
+uniform float u_wall_thickness = 0.25; // @label [S0+S2] Maze Wall Thickness | @min 0.02 | @max 0.9 | @sens 0.01 | @style 0,2
+uniform vec4 u_color_background : source_color = vec4(0.02, 0.03, 0.05, 1.0); // @label [S0+S2] Color: Floor Plates | @min 0 | @max 1 | @sens 0.02 | @style 0,2
+uniform vec4 u_color_walls : source_color = vec4(0.4, 0.2, 0.6, 1.0); // @label [S0+S2] Color: Wall Outlines | @min 0 | @max 1 | @sens 0.02 | @style 0,2
+uniform vec4 u_color_accents : source_color = vec4(0.0, 0.9, 0.6, 1.0); // @label [S0+S2] Color: Corridor Ridges | @min 0 | @max 1 | @sens 0.02 | @style 0,2
+uniform float u_color_morph_speed = 0.6; // @label [S2 Only] Color Morph Speed | @min 0 | @max 8 | @sens 0.5 | @style 2
 
 // --- STYLE 1 (COSINE) CONTROLS ---
-uniform float u_palette_frequency = 1.5; // @label [S1 Only] Spectrum Density | @min 0.2 | @max 5.0 | @sens 0.05
-uniform float u_color_cycle_speed = 0.4; // @label [S1 Only] Spectrum Cycle Speed | @min 0 | @max 3 | @sens 0.05
-uniform vec4 u_color_a : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label [S1 Only] Spectrum Center | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_b : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label [S1 Only] Spectrum Amplitude | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_c : source_color = vec4(1.0, 1.0, 1.0, 1.0); // @label [S1 Only] Spectrum Frequency | @min 0 | @max 2 | @sens 0.02
-uniform vec4 u_color_d : source_color = vec4(0.3, 0.1, 0.5, 1.0); // @label [S1 Only] Spectrum Color Phase | @min 0 | @max 1 | @sens 0.02
+uniform float u_palette_frequency = 1.5; // @label [S1 Only] Spectrum Density | @min 0.05 | @max 12.0 | @sens 0.5 | @style 1
+uniform float u_color_cycle_speed = 0.4; // @label [S1 Only] Spectrum Cycle Speed | @min 0 | @max 8 | @sens 0.5 | @style 1
+uniform vec4 u_color_a : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label [S1 Only] Spectrum Center | @min 0 | @max 1 | @sens 0.02 | @style 1
+uniform vec4 u_color_b : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label [S1 Only] Spectrum Amplitude | @min 0 | @max 1 | @sens 0.02 | @style 1
+uniform vec4 u_color_c : source_color = vec4(1.0, 1.0, 1.0, 1.0); // @label [S1 Only] Spectrum Frequency | @min 0 | @max 4 | @sens 0.02 | @style 1
+uniform vec4 u_color_d : source_color = vec4(0.3, 0.1, 0.5, 1.0); // @label [S1 Only] Spectrum Color Phase | @min 0 | @max 1 | @sens 0.02 | @style 1
 
 // --- STYLE 3 (CYBER) CONTROLS ---
-uniform float u_vein_density = 15.0; // @label [S3 Only] Corridor Circuit Density | @min 4 | @max 35 | @sens 0.5
-uniform float u_glow_sharpness = 0.82; // @label [S3 Only] Circuit Glow Sharpness | @min 0.5 | @max 0.99 | @sens 0.01
-uniform vec4 u_color_base : source_color = vec4(0.01, 0.01, 0.03, 1.0); // @label [S3 Only] Color: Ambient Floor | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_glow : source_color = vec4(0.1, 0.0, 0.25, 1.0); // @label [S3 Only] Color: Wall Radiance | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_pattern_color : source_color = vec4(0.0, 1.0, 0.5, 1.0); // @label [S3 Only] Color: Laser Grid | @min 0 | @max 1 | @sens 0.02
+uniform float u_vein_density = 15.0; // @label [S3 Only] Corridor Circuit Density | @min 1 | @max 60 | @sens 1 | @style 3
+uniform float u_glow_sharpness = 0.82; // @label [S3 Only] Circuit Glow Sharpness | @min 0.05 | @max 0.995 | @sens 0.01 | @style 3
+uniform vec4 u_color_base : source_color = vec4(0.01, 0.01, 0.03, 1.0); // @label [S3 Only] Color: Ambient Floor | @min 0 | @max 1 | @sens 0.02 | @style 3
+uniform vec4 u_color_glow : source_color = vec4(0.1, 0.0, 0.25, 1.0); // @label [S3 Only] Color: Wall Radiance | @min 0 | @max 1 | @sens 0.02 | @style 3
+uniform vec4 u_pattern_color : source_color = vec4(0.0, 1.0, 0.5, 1.0); // @label [S3 Only] Color: Laser Grid | @min 0 | @max 1 | @sens 0.02 | @style 3
 
 vec4 fx_gyroid_master(vec2 uv) {
 	vec2 p = (uv - 0.5) * u_maze_scale;
@@ -908,7 +980,7 @@ vec4 fx_gyroid_master(vec2 uv) {
 	float gyroid_field = (s.x * c.y) + (s.y * cos(coord.z)) + (sin(coord.z) * c.x);
 	float field_abs = abs(gyroid_field);
 	
-	int mode = int(floor(u_render_mode + 0.05));
+	int mode = u_render_mode; // a real int now -- no more floor()-and-epsilon hack
 	vec4 final_color = vec4(0.0);
 	
 	if (mode == 0) {
@@ -956,31 +1028,31 @@ vec4 fx_gyroid_master(vec2 uv) {
 
 	
 const SRC_PLASMA_MASTER: String = """
-uniform float u_render_mode = 0.0; // @label Style Select (0=Static, 1=Cosine, 2=Chrono, 3=Cyber) | @min 0.0 | @max 3.0 | @sens 1.0
-uniform vec2 u_plasma_scale = vec2(4.0, 4.0); // @label Global: Wave Scale | @min 1.0 | @max 16.0 | @sens 0.1
-uniform float u_plasma_speed = 1.0; // @label Global: Wave Speed | @min 0.0 | @max 4.0 | @sens 0.05
-uniform float u_turbulence = 1.0; // @label Global: Wave Complexity | @min 0.2 | @max 4.0 | @sens 0.05
+uniform int u_render_mode = 0; // @label Style Select (0=Static, 1=Cosine, 2=Chrono, 3=Cyber) | @min 0 | @max 3 | @sens 1 | @is_style
+uniform vec2 u_plasma_scale = vec2(4.0, 4.0); // @label Global: Wave Scale | @min 0.5 | @max 28.0 | @sens 0.5
+uniform float u_plasma_speed = 1.0; // @label Global: Wave Speed | @min 0.0 | @max 8.0 | @sens 0.5
+uniform float u_turbulence = 1.0; // @label Global: Wave Complexity | @min 0.05 | @max 8.0 | @sens 0.5
 
 // --- STYLE 0 (STATIC) & STYLE 2 (CHRONO) CONTROLS ---
-uniform vec4 u_color_trough : source_color = vec4(0.02, 0.0, 0.1, 1.0); // @label [S0+S2] Color: Wave Trough | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_slope : source_color = vec4(0.1, 0.4, 0.8, 1.0); // @label [S0+S2] Color: Wave Slope | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_crest : source_color = vec4(0.0, 1.0, 0.9, 1.0); // @label [S0+S2] Color: Wave Crest | @min 0 | @max 1 | @sens 0.02
-uniform float u_color_morph_speed = 0.7; // @label [S2 Only] Color Morph Speed | @min 0 | @max 4 | @sens 0.05
+uniform vec4 u_color_trough : source_color = vec4(0.02, 0.0, 0.1, 1.0); // @label [S0+S2] Color: Wave Trough | @min 0 | @max 1 | @sens 0.02 | @style 0,2
+uniform vec4 u_color_slope : source_color = vec4(0.1, 0.4, 0.8, 1.0); // @label [S0+S2] Color: Wave Slope | @min 0 | @max 1 | @sens 0.02 | @style 0,2
+uniform vec4 u_color_crest : source_color = vec4(0.0, 1.0, 0.9, 1.0); // @label [S0+S2] Color: Wave Crest | @min 0 | @max 1 | @sens 0.02 | @style 0,2
+uniform float u_color_morph_speed = 0.7; // @label [S2 Only] Color Morph Speed | @min 0 | @max 8 | @sens 0.5 | @style 2
 
 // --- STYLE 1 (COSINE) CONTROLS ---
-uniform float u_palette_frequency = 2.0; // @label [S1 Only] Wave Color Density | @min 0.5 | @max 6.0 | @sens 0.05
-uniform float u_color_cycle_speed = 0.5; // @label [S1 Only] Spectrum Cycle Speed | @min 0 | @max 3 | @sens 0.05
-uniform vec4 u_color_a : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label [S1 Only] Spectrum Center | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_b : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label [S1 Only] Spectrum Amplitude | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_c : source_color = vec4(1.0, 1.0, 1.0, 1.0); // @label [S1 Only] Spectrum Frequency | @min 0 | @max 2 | @sens 0.02
-uniform vec4 u_color_d : source_color = vec4(0.0, 0.33, 0.67, 1.0); // @label [S1 Only] Spectrum Color Phase | @min 0 | @max 1 | @sens 0.02
+uniform float u_palette_frequency = 2.0; // @label [S1 Only] Wave Color Density | @min 0.1 | @max 14.0 | @sens 0.5 | @style 1
+uniform float u_color_cycle_speed = 0.5; // @label [S1 Only] Spectrum Cycle Speed | @min 0 | @max 8 | @sens 0.5 | @style 1
+uniform vec4 u_color_a : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label [S1 Only] Spectrum Center | @min 0 | @max 1 | @sens 0.02 | @style 1
+uniform vec4 u_color_b : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label [S1 Only] Spectrum Amplitude | @min 0 | @max 1 | @sens 0.02 | @style 1
+uniform vec4 u_color_c : source_color = vec4(1.0, 1.0, 1.0, 1.0); // @label [S1 Only] Spectrum Frequency | @min 0 | @max 4 | @sens 0.02 | @style 1
+uniform vec4 u_color_d : source_color = vec4(0.0, 0.33, 0.67, 1.0); // @label [S1 Only] Spectrum Color Phase | @min 0 | @max 1 | @sens 0.02 | @style 1
 
 // --- STYLE 3 (CYBER) CONTROLS ---
-uniform float u_vein_density = 14.0; // @label [S3 Only] Ring Pulse Density | @min 4.0 | @max 28.0 | @sens 0.5
-uniform float u_glow_sharpness = 0.84; // @label [S3 Only] Filament Sharpness | @min 0.5 | @max 0.99 | @sens 0.01
-uniform vec4 u_color_base : source_color = vec4(0.01, 0.01, 0.03, 1.0); // @label [S3 Only] Color: Void Base | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_glow : source_color = vec4(0.0, 0.2, 0.15, 1.0); // @label [S3 Only] Color: Background Light | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_pattern_color : source_color = vec4(0.3, 1.0, 0.0, 1.0); // @label [S3 Only] Color: Neon Filament | @min 0 | @max 1 | @sens 0.02
+uniform float u_vein_density = 14.0; // @label [S3 Only] Ring Pulse Density | @min 1.0 | @max 55.0 | @sens 1 | @style 3
+uniform float u_glow_sharpness = 0.84; // @label [S3 Only] Filament Sharpness | @min 0.05 | @max 0.995 | @sens 0.01 | @style 3
+uniform vec4 u_color_base : source_color = vec4(0.01, 0.01, 0.03, 1.0); // @label [S3 Only] Color: Void Base | @min 0 | @max 1 | @sens 0.02 | @style 3
+uniform vec4 u_color_glow : source_color = vec4(0.0, 0.2, 0.15, 1.0); // @label [S3 Only] Color: Background Light | @min 0 | @max 1 | @sens 0.02 | @style 3
+uniform vec4 u_pattern_color : source_color = vec4(0.3, 1.0, 0.0, 1.0); // @label [S3 Only] Color: Neon Filament | @min 0 | @max 1 | @sens 0.02 | @style 3
 
 vec4 fx_plasma_master(vec2 uv) {
 	vec2 p = (uv - 0.5) * u_plasma_scale;
@@ -994,8 +1066,7 @@ vec4 fx_plasma_master(vec2 uv) {
 	float plasma_field = (v1 + v2 + v3) / 3.0;
 	plasma_field = plasma_field * 0.5 + 0.5;
 	
-	// Convert the slider float to a strict integer step safely
-	int mode = int(floor(u_render_mode + 0.05));
+	int mode = u_render_mode; // a real int now -- no more floor()-and-epsilon hack
 	vec4 final_color = vec4(0.0);
 	
 	if (mode == 0) {
@@ -1708,7 +1779,7 @@ const SRC_POLAR_KALEIDOSCOPE: String = """
 uniform float u_sectors = 8.0; // @label Radial Slices | @min 2.0 | @max 32.0 | @sens 1.0
 uniform float u_rings = 3.0; // @label Concentric Rings | @min 1.0 | @max 12.0 | @sens 1.0
 uniform float u_ring_zoom = 1.5; // @label Ring Scaling | @min 0.5 | @max 5.0 | @sens 0.05
-uniform float u_rotation_speed = 0.2; // @label Slice Spin Speed | @min -2.0 | @max 2.0 | @sens 0.05
+uniform float u_rotation_speed = 0.0; // @label Slice Spin Speed | @min -2.0 | @max 2.0 | @sens 0.05
 uniform float u_pulse_speed = 0.1; // @label Ring Pulse Speed | @min -1.0 | @max 1.0 | @sens 0.02
 
 vec2 fx_polar_kaleidoscope(vec2 uv) {
@@ -1800,7 +1871,7 @@ vec2 fx_chromatic_ripple(vec2 uv) {
 const SRC_POLAR_MAP: String = """
 uniform float u_zoom = 1.0; // @label Tunnel Zoom | @min 0.2 | @max 5.0 | @sens 0.05
 uniform float u_repeats_radial = 2.0; // @label Ring Repeats | @min 0.5 | @max 8.0 | @sens 0.5
-uniform float u_spin_speed = 0.2; // @label Spin Speed | @min -2.0 | @max 2.0 | @sens 0.05
+uniform float u_spin_speed = 0.0; // @label Spin Speed | @min -2.0 | @max 2.0 | @sens 0.05
 uniform float u_tunnel_speed = 0.3; // @label Tunnel Fly Speed | @min -3.0 | @max 3.0 | @sens 0.05
 
 vec2 fx_polar_map(vec2 uv) {
@@ -1832,32 +1903,32 @@ vec2 fx_polar_map(vec2 uv) {
 
 
 const SRC_VORONOI_MASTER: String = """
-uniform float u_render_mode = 0.0; // @label Style Select (0=Crystal, 1=Cosine, 2=Chrono, 3=Cyber) | @min 0.0 | @max 3.0 | @sens 1.0
-uniform vec2 u_cell_scale = vec2(5.0, 5.0); // @label Global: Cell Scale | @min 1.0 | @max 20.0 | @sens 0.1
-uniform float u_jitter = 1.0; // @label Global: Chaos / Jitter | @min 0.0 | @max 1.0 | @sens 0.05
-uniform float u_cell_speed = 0.5; // @label Global: Cell Agitation Speed | @min 0.0 | @max 3.0 | @sens 0.05
+uniform int u_render_mode = 0; // @label Style Select (0=Crystal, 1=Cosine, 2=Chrono, 3=Cyber) | @min 0 | @max 3 | @sens 1 | @is_style
+uniform vec2 u_cell_scale = vec2(5.0, 5.0); // @label Global: Cell Scale | @min 0.5 | @max 35.0 | @sens 0.5
+uniform float u_jitter = 1.0; // @label Global: Chaos / Jitter | @min 0.0 | @max 2.0 | @sens 0.5
+uniform float u_cell_speed = 0.5; // @label Global: Cell Agitation Speed | @min 0.0 | @max 6.0 | @sens 0.5
 
 // --- STYLE 0 (STATIC) & STYLE 2 (CHRONO) CONTROLS ---
-uniform float u_border_thickness = 0.04; // @label [S0+S2] Border Thickness | @min 0.01 | @max 0.2 | @sens 0.005
-uniform vec4 u_color_cell_core : source_color = vec4(0.05, 0.25, 0.4, 1.0); // @label [S0+S2] Color: Cell Core | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_cell_edge : source_color = vec4(0.1, 0.6, 0.7, 1.0); // @label [S0+S2] Color: Cell Slopes | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_border : source_color = vec4(1.0, 0.95, 0.8, 1.0); // @label [S0+S2] Color: Crystal Borders | @min 0 | @max 1 | @sens 0.02
-uniform float u_color_morph_speed = 0.6; // @label [S2 Only] Color Morph Speed | @min 0 | @max 4 | @sens 0.05
+uniform float u_border_thickness = 0.04; // @label [S0+S2] Border Thickness | @min 0.005 | @max 0.4 | @sens 0.005 | @style 0,2
+uniform vec4 u_color_cell_core : source_color = vec4(0.05, 0.25, 0.4, 1.0); // @label [S0+S2] Color: Cell Core | @min 0 | @max 1 | @sens 0.02 | @style 0,2
+uniform vec4 u_color_cell_edge : source_color = vec4(0.1, 0.6, 0.7, 1.0); // @label [S0+S2] Color: Cell Slopes | @min 0 | @max 1 | @sens 0.02 | @style 0,2
+uniform vec4 u_color_border : source_color = vec4(1.0, 0.95, 0.8, 1.0); // @label [S0+S2] Color: Crystal Borders | @min 0 | @max 1 | @sens 0.02 | @style 0,2
+uniform float u_color_morph_speed = 0.6; // @label [S2 Only] Color Morph Speed | @min 0 | @max 8 | @sens 0.5 | @style 2
 
 // --- STYLE 1 (COSINE) CONTROLS ---
-uniform float u_palette_frequency = 1.5; // @label [S1 Only] Spectrum Density | @min 0.2 | @max 5.0 | @sens 0.05
-uniform float u_color_cycle_speed = 0.4; // @label [S1 Only] Spectrum Cycle Speed | @min 0 | @max 3 | @sens 0.05
-uniform vec4 u_color_a : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label [S1 Only] Spectrum Center | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_b : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label [S1 Only] Spectrum Amplitude | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_c : source_color = vec4(1.0, 1.0, 1.0, 1.0); // @label [S1 Only] Spectrum Frequency | @min 0 | @max 2 | @sens 0.02
-uniform vec4 u_color_d : source_color = vec4(0.0, 0.33, 0.67, 1.0); // @label [S1 Only] Spectrum Color Phase | @min 0 | @max 1 | @sens 0.02
+uniform float u_palette_frequency = 1.5; // @label [S1 Only] Spectrum Density | @min 0.05 | @max 12.0 | @sens 0.5 | @style 1
+uniform float u_color_cycle_speed = 0.4; // @label [S1 Only] Spectrum Cycle Speed | @min 0 | @max 8 | @sens 0.5 | @style 1
+uniform vec4 u_color_a : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label [S1 Only] Spectrum Center | @min 0 | @max 1 | @sens 0.02 | @style 1
+uniform vec4 u_color_b : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label [S1 Only] Spectrum Amplitude | @min 0 | @max 1 | @sens 0.02 | @style 1
+uniform vec4 u_color_c : source_color = vec4(1.0, 1.0, 1.0, 1.0); // @label [S1 Only] Spectrum Frequency | @min 0 | @max 4 | @sens 0.02 | @style 1
+uniform vec4 u_color_d : source_color = vec4(0.0, 0.33, 0.67, 1.0); // @label [S1 Only] Spectrum Color Phase | @min 0 | @max 1 | @sens 0.02 | @style 1
 
 // --- STYLE 3 (CYBER) CONTROLS ---
-uniform float u_vein_density = 10.0; // @label [S3 Only] Pulse Wave Density | @min 4.0 | @max 25.0 | @sens 0.5
-uniform float u_glow_sharpness = 0.80; // @label [S3 Only] Laser Line Sharpness | @min 0.5 | @max 0.99 | @sens 0.01
-uniform vec4 u_color_base : source_color = vec4(0.01, 0.01, 0.03, 1.0); // @label [S3 Only] Color: Cell Void | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_glow : source_color = vec4(0.2, 0.0, 0.1, 1.0); // @label [S3 Only] Color: Plate Radiance | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_pattern_color : source_color = vec4(1.0, 0.0, 0.4, 1.0); // @label [S3 Only] Color: Filament Laser | @min 0 | @max 1 | @sens 0.02
+uniform float u_vein_density = 10.0; // @label [S3 Only] Pulse Wave Density | @min 1.0 | @max 50.0 | @sens 1 | @style 3
+uniform float u_glow_sharpness = 0.80; // @label [S3 Only] Laser Line Sharpness | @min 0.05 | @max 0.995 | @sens 0.01 | @style 3
+uniform vec4 u_color_base : source_color = vec4(0.01, 0.01, 0.03, 1.0); // @label [S3 Only] Color: Cell Void | @min 0 | @max 1 | @sens 0.02 | @style 3
+uniform vec4 u_color_glow : source_color = vec4(0.2, 0.0, 0.1, 1.0); // @label [S3 Only] Color: Plate Radiance | @min 0 | @max 1 | @sens 0.02 | @style 3
+uniform vec4 u_pattern_color : source_color = vec4(1.0, 0.0, 0.4, 1.0); // @label [S3 Only] Color: Filament Laser | @min 0 | @max 1 | @sens 0.02 | @style 3
 
 
 // Cellular hash to place points randomly inside grids
@@ -1904,8 +1975,7 @@ vec4 fx_voronoi_master(vec2 uv) {
 	
 	float crystal_borders = d2 - d1;
 	
-	// Convert the slider float to a strict integer step safely
-	int mode = int(floor(u_render_mode + 0.05));
+	int mode = u_render_mode; // a real int now -- no more floor()-and-epsilon hack
 	vec4 final_color = vec4(0.0);
 	
 	if (mode == 0) {
@@ -1947,41 +2017,46 @@ vec4 fx_voronoi_master(vec2 uv) {
 
 
 const SRC_FBM_MASTER: String = """
-uniform float u_render_mode = 0.0; // @label Style Select (0=Ramp, 1=Cosine, 2=Chrono, 3=Cyber) | @min 0.0 | @max 3.0 | @sens 1.0
-uniform vec2 u_warp_frequency = vec2(2.5, 2.5); // @label Global: Warp Frequency | @min 0.1 | @max 12 | @sens 0.05
-uniform float u_warp_strength = 1.1; // @label Global: Warp Strength | @min 0 | @max 4 | @sens 0.05
-uniform float u_noise_detail = 4.0; // @label Global: Noise Detail Octaves | @min 1 | @max 5 | @sens 1
-uniform float u_flow_speed = 0.4; // @label Global: Fluid Flow Speed | @min 0 | @max 3 | @sens 0.05
+uniform int u_render_mode = 0; // @label Style Select (0=Ramp, 1=Cosine, 2=Chrono, 3=Cyber) | @min 0 | @max 3 | @sens 1 | @is_style
+uniform vec2 u_warp_frequency = vec2(2.5, 2.5); // @label Global: Warp Frequency | @min 0.05 | @max 24 | @sens 0.5
+uniform float u_warp_strength = 1.1; // @label Global: Warp Strength | @min 0 | @max 8 | @sens 0.5
+uniform float u_noise_detail = 4.0; // @label Global: Noise Detail Octaves | @min 1 | @max 8 | @sens 1
+uniform float u_flow_speed = 0.4; // @label Global: Fluid Flow Speed | @min 0 | @max 6 | @sens 0.5
 
 // --- STYLE 0 (UPGRADED STATIC RAMP) CONTROLS ---
-uniform float u_palette_frequency = 1.0; // @label [S0 Only] Color Density Ring Loops | @min 0.2 | @max 5.0 | @sens 0.05
-uniform vec4 u_color_1 : source_color = vec4(0.02, 0.02, 0.05, 1.0); // @label [S0 Only] Color Slot 1 (Base) | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_2 : source_color = vec4(0.12, 0.0, 0.22, 1.0); // @label [S0 Only] Color Slot 2 (Mid-Low) | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_3 : source_color = vec4(0.0, 0.5, 0.5, 1.0); // @label [S0 Only] Color Slot 3 (Mid-High) | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_4 : source_color = vec4(0.1, 0.7, 0.9, 1.0); // @label [S0 Only] Color Slot 4 (Crest) | @min 0 | @max 1 | @sens 0.02
-uniform float u_base_clamp = 0.10; // @label [S0 Only] Solid Color Bounds 1 | @min 0.0 | @max 0.4 | @sens 0.01
-uniform float u_pos_split_1 = 0.30; // @label [S0 Only] Solid Color Bounds 2 | @min 0.15 | @max 0.6 | @sens 0.01
-uniform float u_pos_split_2 = 0.55; // @label [S0 Only] Solid Color Bounds 3 | @min 0.35 | @max 0.8 | @sens 0.01
-uniform float u_pos_split_3 = 0.80; // @label [S0 Only] Solid Color Bounds 4 | @min 0.60 | @max 0.99 | @sens 0.01
-uniform float u_aa_feather = 0.02; // @label [S0 Only] Band Edge Smoothness | @min 0.001 | @max 0.4 | @sens 0.01
+uniform float u_palette_frequency = 1.0; // @label [S0 Only] Color Density Ring Loops | @min 0.05 | @max 12.0 | @sens 0.5 | @style 0
+uniform vec4 u_color_1 : source_color = vec4(0.02, 0.02, 0.05, 1.0); // @label [S0 Only] Color Slot 1 (Base) | @min 0 | @max 1 | @sens 0.02 | @style 0
+uniform vec4 u_color_2 : source_color = vec4(0.12, 0.0, 0.22, 1.0); // @label [S0 Only] Color Slot 2 (Mid-Low) | @min 0 | @max 1 | @sens 0.02 | @style 0
+uniform vec4 u_color_3 : source_color = vec4(0.0, 0.5, 0.5, 1.0); // @label [S0 Only] Color Slot 3 (Mid-High) | @min 0 | @max 1 | @sens 0.02 | @style 0
+uniform vec4 u_color_4 : source_color = vec4(0.1, 0.7, 0.9, 1.0); // @label [S0 Only] Color Slot 4 (Crest) | @min 0 | @max 1 | @sens 0.02 | @style 0
+uniform float u_base_clamp = 0.10; // @label [S0 Only] Solid Color Bounds 1 | @min 0.0 | @max 0.4 | @sens 0.01 | @style 0
+uniform float u_pos_split_1 = 0.30; // @label [S0 Only] Solid Color Bounds 2 | @min 0.15 | @max 0.6 | @sens 0.01 | @style 0
+uniform float u_pos_split_2 = 0.55; // @label [S0 Only] Solid Color Bounds 3 | @min 0.35 | @max 0.8 | @sens 0.01 | @style 0
+uniform float u_pos_split_3 = 0.80; // @label [S0 Only] Solid Color Bounds 4 | @min 0.60 | @max 0.99 | @sens 0.01 | @style 0
+uniform float u_aa_feather = 0.02; // @label [S0 Only] Band Edge Smoothness | @min 0.001 | @max 0.4 | @sens 0.01 | @style 0
 
 // --- STYLE 1 (COSINE PALETTE) CONTROLS ---
-uniform float u_color_cycle_speed = 0.5; // @label [S1 Only] Spectrum Cycle Speed | @min 0 | @max 3 | @sens 0.05
-uniform vec4 u_color_a : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label [S1 Only] Spectrum Center | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_b : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label [S1 Only] Spectrum Amplitude | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_c : source_color = vec4(1.0, 1.0, 1.0, 1.0); // @label [S1 Only] Spectrum Frequency | @min 0 | @max 2 | @sens 0.02
-uniform vec4 u_color_d : source_color = vec4(0.0, 0.33, 0.67, 1.0); // @label [S1 Only] Spectrum Color Phase | @min 0 | @max 1 | @sens 0.02
+uniform float u_color_cycle_speed = 0.5; // @label [S1 Only] Spectrum Cycle Speed | @min 0 | @max 8 | @sens 0.5 | @style 1
+uniform vec4 u_color_a : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label [S1 Only] Spectrum Center | @min 0 | @max 1 | @sens 0.02 | @style 1
+uniform vec4 u_color_b : source_color = vec4(0.5, 0.5, 0.5, 1.0); // @label [S1 Only] Spectrum Amplitude | @min 0 | @max 1 | @sens 0.02 | @style 1
+uniform vec4 u_color_c : source_color = vec4(1.0, 1.0, 1.0, 1.0); // @label [S1 Only] Spectrum Frequency | @min 0 | @max 4 | @sens 0.02 | @style 1
+uniform vec4 u_color_d : source_color = vec4(0.0, 0.33, 0.67, 1.0); // @label [S1 Only] Spectrum Color Phase | @min 0 | @max 1 | @sens 0.02 | @style 1
 
 // --- STYLE 2 (CHRONO MORPH) CONTROLS ---
-uniform float u_color_morph_speed = 0.5; // @label [S2 Only] Nebula Evolve Speed | @min 0 | @max 4 | @sens 0.05
-uniform vec4 u_color_base : source_color = vec4(0.02, 0.02, 0.05, 1.0); // @label [S2 Only] Color: Void Floor | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_warp_q : source_color = vec4(0.12, 0.0, 0.22, 1.0); // @label [S2 Only] Color: Shift Factor A | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_warp_r : source_color = vec4(0.0, 0.5, 0.5, 1.0); // @label [S2 Only] Color: Shift Factor B | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_pattern_color : source_color = vec4(0.1, 0.7, 0.9, 1.0); // @label [S2 Only] Color: Ridge Highlight | @min 0 | @max 1 | @sens 0.02
+// NOTE: u_color_base and u_pattern_color are also used by Style 3 below (see fx_fbm_master) -- tagged
+// for both styles rather than "S2 Only" like their comment used to (mis)claim.
+uniform float u_color_morph_speed = 0.5; // @label [S2 Only] Nebula Evolve Speed | @min 0 | @max 8 | @sens 0.5 | @style 2
+uniform vec4 u_color_base : source_color = vec4(0.02, 0.02, 0.05, 1.0); // @label [S2+S3] Color: Void Floor | @min 0 | @max 1 | @sens 0.02 | @style 2,3
+uniform vec4 u_color_warp_q : source_color = vec4(0.12, 0.0, 0.22, 1.0); // @label [S2 Only] Color: Shift Factor A | @min 0 | @max 1 | @sens 0.02 | @style 2
+uniform vec4 u_color_warp_r : source_color = vec4(0.0, 0.5, 0.5, 1.0); // @label [S2 Only] Color: Shift Factor B | @min 0 | @max 1 | @sens 0.02 | @style 2
+uniform vec4 u_pattern_color : source_color = vec4(0.1, 0.7, 0.9, 1.0); // @label [S2+S3] Color: Ridge Highlight | @min 0 | @max 1 | @sens 0.02 | @style 2,3
 
 // --- STYLE 3 (CYBER VEINS) CONTROLS ---
-uniform float u_vein_density = 12.0; // @label [S3 Only] Laser Ring Density | @min 4 | @max 30 | @sens 0.5
-uniform float u_glow_sharpness = 0.85; // @label [S3 Only] Laser Glow Sharpness | @min 0.5 | @max 0.99 | @sens 0.01
+uniform float u_vein_density = 12.0; // @label [S3 Only] Laser Ring Density | @min 1 | @max 50 | @sens 1 | @style 3
+uniform float u_glow_sharpness = 0.85; // @label [S3 Only] Laser Glow Sharpness | @min 0.05 | @max 0.995 | @sens 0.01 | @style 3
+// Style 3 used to just reuse Style 2's u_color_warp_q for its glow -- the other three master shaders
+// all give Cyber mode its OWN third color, so this gives FBM the same independence.
+uniform vec4 u_color_cyber_glow : source_color = vec4(0.12, 0.0, 0.22, 1.0); // @label [S3 Only] Color: Circuit Glow | @min 0 | @max 1 | @sens 0.02 | @style 3
 
 
 float fbm_hash2d(vec2 p) { 
@@ -1997,7 +2072,7 @@ float fbm_value_noise(vec2 p) {
 
 float fbm_octaves(vec2 p) {
 	float value = 0.0; float amplitude = 0.5; float frequency = 1.0;
-	for (int i = 0; i < 5; i++) {
+	for (int i = 0; i < 8; i++) { // raised from 5 to 8 so the widened Noise Detail range (now up to 8) actually does something
 		if (float(i) >= u_noise_detail) break;
 		value += amplitude * fbm_value_noise(p * frequency);
 		frequency *= 2.0; amplitude *= 0.5;
@@ -2014,7 +2089,7 @@ vec4 fx_fbm_master(vec2 uv) {
 	vec2 r = vec2(fbm_octaves(st + u_warp_strength * q + vec2(1.7, 9.2) + vec2(scaled_time * 0.3)), fbm_octaves(st + u_warp_strength * q + vec2(8.3, 2.8) + vec2(scaled_time * 0.05)));
 	float final_field_math = fbm_octaves(st + u_warp_strength * r);
 	
-	int mode = int(floor(u_render_mode + 0.05));
+	int mode = u_render_mode; // a real int now -- no more floor()-and-epsilon hack
 	vec4 final_color = vec4(0.0);
 	
 	if (mode == 0) {
@@ -2054,15 +2129,16 @@ vec4 fx_fbm_master(vec2 uv) {
 		final_color = final_mix * (final_field_math * 1.5 + 0.3);
 	} 
 	else {
-		// VARIANT 3: CYBER NEON VEINS
+		// VARIANT 3: CYBER NEON VEINS -- now uses its own dedicated glow color instead of borrowing
+		// Style 2's u_color_warp_q, so Cyber's palette no longer shifts when you tune Chrono's colors.
 		float pulse = sin(final_field_math * u_vein_density + u_time * 0.5) * 0.5 + 0.5;
 		float veins = smoothstep(u_glow_sharpness, u_glow_sharpness + 0.08, pulse);
 		
-		vec4 dynamic_bg = mix(u_color_base, u_color_warp_q, final_field_math);
+		vec4 dynamic_bg = mix(u_color_base, u_color_cyber_glow, final_field_math);
 		float vein_mask = veins * (length(r) * 1.2 + 0.2);
 		vec4 final_mix = mix(dynamic_bg, u_pattern_color, clamp(vein_mask, 0.0, 1.0));
 		
-		final_color = final_mix + (final_field_math * u_color_warp_q * 0.3);
+		final_color = final_mix + (final_field_math * u_color_cyber_glow * 0.3);
 	}
 	
 	return final_color;
@@ -2072,7 +2148,7 @@ vec4 fx_fbm_master(vec2 uv) {
 
 const SRC_KALEIDOSCOPE: String = """
 uniform float u_segments = 6.0; // @label Slides | @min 1 | @max 32 | @sens 1
-uniform float u_rotation_speed = 0.2; // @label Rotation Speed | @min -2 | @max 2 | @sens 0.05
+uniform float u_rotation_speed = 0.0; // @label Rotation Speed | @min -2 | @max 2 | @sens 0.05
 
 vec2 fx_kaleidoscope(vec2 uv_in) {
 	vec2 uv = uv_in - 0.5;

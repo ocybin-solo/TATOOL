@@ -17,10 +17,6 @@ config/features=PackedStringArray("4.7", "Mobile")
 boot_splash/bg_color=Color(0, 0, 0, 1)
 config/icon="uid://bbwsqx4qsaymw"
 
-[display]
-
-window/stretch/mode="viewport"
-
 [input]
 
 ui_accept={

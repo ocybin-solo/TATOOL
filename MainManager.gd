@@ -13,6 +13,7 @@ var label_perf_monitor: Label
 var vram_display_visible: bool = false
 var perf_bar: PanelContainer
 
+
 # --- START MENU HOOKS ---
 var menu_overlay_panel: PanelContainer
 var menu_list_box: VBoxContainer
@@ -564,7 +565,9 @@ func prepare_uniform_list(recipe_id: String) -> void:
 	if recipe_id == "":
 		list = library.global_uniforms(pass_records[p])
 	else:
-		list = library.uniforms_for_recipe(pass_records[p], recipe_id)
+		# Filters out uniforms belonging to a style other than the one currently active, so a master
+		# shader with several style variants only shows the controls for the style you're actually on.
+		list = library.visible_uniforms(pass_records[p], recipe_id, pass_values[p])
 	control_panel.active_recipe_id = recipe_id
 	control_panel.parsed_uniforms = list
 	control_panel.active_index = 0
@@ -721,13 +724,23 @@ func redraw_fast_travel_menu() -> void:
 	for child in menu_list_box.get_children(): child.queue_free()
 
 	var is_globals: bool = control_panel.active_recipe_id == ""
+
+	# Re-filter by the CURRENT style every time this redraws (not just on first entry), so backing out
+	# of Tier 4/5 after changing a style selector immediately shows that style's own uniform list.
+	var p: int = active_shader_layer
+	if is_globals:
+		control_panel.parsed_uniforms = library.global_uniforms(pass_records[p])
+	else:
+		control_panel.parsed_uniforms = library.visible_uniforms(pass_records[p], control_panel.active_recipe_id, pass_values[p])
+	var uniforms_list: Array = control_panel.parsed_uniforms
+	control_panel.last_tier3_index = clampi(control_panel.last_tier3_index, 0, uniforms_list.size())
+
 	var label_title = Label.new()
 	label_title.text = " ⚙ GLOBAL UNIFORMS " if is_globals else " 🕹️ PARAMETER UNIFORMS LIST "
 	label_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label_title.add_theme_color_override("font_color", Color.CYAN)
 	menu_list_box.add_child(label_title)
 
-	var uniforms_list: Array = control_panel.parsed_uniforms
 	if uniforms_list.is_empty():
 		var lbl_empty = Label.new()
 		lbl_empty.text = "    [ NO GLOBAL UNIFORMS IN THIS PASS YET ]    "
@@ -747,9 +760,12 @@ func redraw_fast_travel_menu() -> void:
 		if i == 0:
 			_add_menu_row(_tier3_row0_label(), i == cursor, Color.WHITE, Color.LIGHT_GOLDENROD)
 		else:
-			_add_menu_row(String(uniforms_list[i - 1]["label"]).to_upper(), i == cursor)
+			var row_rec: Dictionary = uniforms_list[i - 1]
+			var row_text: String = String(row_rec["label"]).to_upper()
+			if row_rec["is_style"]:
+				row_text = "★ " + row_text # the style selector stands out from its own group's controls
+			_add_menu_row(row_text, i == cursor)
 	if scrolling: _add_scroll_hint(stop < total_rows, "▼")
-
 
 # =========================================================================
 # TIER 4 -- PARAMETERS (channels) OF ONE UNIFORM
@@ -790,6 +806,7 @@ func open_live_tweak_console() -> void:
 	var idx: int = clampi(control_panel.last_tier4_index, 0, channel_names.size() - 1)
 	var raw_val: Variant = control_panel.uniform_values.get(rec["name"], rec["default"])
 	var display_value: float = library.get_component(raw_val, rec["type"], idx)
+	var is_bool: bool = rec["type"] == "bool"
 
 	var label_title = Label.new()
 	label_title.text = " +═ PARAMETER TWEAK CONSOLE ═+ "
@@ -797,7 +814,6 @@ func open_live_tweak_console() -> void:
 	label_title.add_theme_color_override("font_color", Color.ORANGE)
 	menu_list_box.add_child(label_title)
 
-	# 1. Name header (with the channel when the uniform has more than one)
 	var name_text: String = String(rec["label"]).to_upper()
 	if channel_names.size() > 1:
 		name_text += "  ·  " + channel_names[idx]
@@ -806,24 +822,24 @@ func open_live_tweak_console() -> void:
 	lbl_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	menu_list_box.add_child(lbl_name)
 
-	# 2. Live value row (cursor row 0)
+	var value_text: String = ("ON" if display_value > 0.5 else "OFF") if is_bool else _fmt(display_value)
 	var lbl_val = Label.new()
 	if control_panel.last_tier5_row == 0:
-		lbl_val.text = " ▶ ║ VALUE: ◄ [ %s ] ► " % _fmt(display_value)
+		lbl_val.text = " ▶ ║ VALUE: ◄ [ %s ] ► " % value_text
 		lbl_val.add_theme_color_override("font_color", Color.YELLOW)
 	else:
-		lbl_val.text = "    ║ VALUE:   [ %s ]   " % _fmt(display_value)
+		lbl_val.text = "    ║ VALUE:   [ %s ]   " % value_text
 		lbl_val.add_theme_color_override("font_color", Color.DARK_GRAY)
 	lbl_val.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	menu_list_box.add_child(lbl_val)
 
-	# 3. Sensitivity row (cursor row 1)
 	var lbl_sens = Label.new()
+	var sens_text: String = "N/A (TOGGLE)" if is_bool else _fmt(control_panel.sensitivity)
 	if control_panel.last_tier5_row == 1:
-		lbl_sens.text = " ▶ ║ SENS : ◄ [ %s ] ► " % _fmt(control_panel.sensitivity)
+		lbl_sens.text = " ▶ ║ SENS : ◄ [ %s ] ► " % sens_text
 		lbl_sens.add_theme_color_override("font_color", Color.YELLOW)
 	else:
-		lbl_sens.text = "    ║ SENS :   [ %s ]   " % _fmt(control_panel.sensitivity)
+		lbl_sens.text = "    ║ SENS :   [ %s ]   " % sens_text
 		lbl_sens.add_theme_color_override("font_color", Color.DARK_GRAY)
 	lbl_sens.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	menu_list_box.add_child(lbl_sens)
@@ -834,16 +850,15 @@ func open_live_tweak_console() -> void:
 	blank_spacer.add_theme_color_override("font_color", Color.DARK_GRAY)
 	menu_list_box.add_child(blank_spacer)
 
-	# 4. Static default value of THIS channel, straight from the shader's own default
+	var default_text: String = ("ON" if library.default_component(rec, idx) > 0.5 else "OFF") if is_bool else _fmt(library.default_component(rec, idx))
 	var lbl_def_val = Label.new()
-	lbl_def_val.text = " ║ DEFAULT VAL : [ %s ]   ║ " % _fmt(library.default_component(rec, idx))
+	lbl_def_val.text = " ║ DEFAULT VAL : [ %s ]   ║ " % default_text
 	lbl_def_val.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	lbl_def_val.add_theme_color_override("font_color", Color.DIM_GRAY)
 	menu_list_box.add_child(lbl_def_val)
 
-	# 5. Static recommended sensitivity for this uniform (from its @sens tag)
 	var lbl_rec_sens = Label.new()
-	lbl_rec_sens.text = " ║ RECOMMENDED SENS: [ %s ]   ║ " % _fmt(rec["sens"])
+	lbl_rec_sens.text = " ║ RECOMMENDED SENS: [ %s ]   ║ " % ("--" if is_bool else _fmt(rec["sens"]))
 	lbl_rec_sens.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	lbl_rec_sens.add_theme_color_override("font_color", Color.DIM_GRAY)
 	menu_list_box.add_child(lbl_rec_sens)
@@ -853,7 +868,6 @@ func open_live_tweak_console() -> void:
 	label_footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label_footer.add_theme_color_override("font_color", Color.ORANGE)
 	menu_list_box.add_child(label_footer)
-
 
 func _process(delta: float) -> void:
 	current_time += delta
@@ -955,3 +969,4 @@ func load_default_test_shaders() -> void:
 		rebuild_pass(p)
 
 	control_panel.uniform_values = pass_values[active_shader_layer]
+	
