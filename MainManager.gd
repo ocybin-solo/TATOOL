@@ -65,6 +65,7 @@ var current_time: float = 0.0
 # SELECT & START State Trackers
 var active_shader_layer: int = 0
 var is_menu_open: bool = false
+var menu_peek_hidden: bool = false
 
 # --- SHADER LIBRARY PIPELINE STATE ---
 # ShaderLibrary.gd is the single source of truth for every menu. Per pass we track which
@@ -107,7 +108,7 @@ func _ready() -> void:
 	perf_bar.offset_top = -28.0
 	perf_bar.offset_bottom = 0.0
 	perf_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	perf_bar.visible = vram_display_visible
+	perf_bar.visible = false
 	perf_layer.add_child(perf_bar)
 	label_perf_monitor = Label.new()
 	label_perf_monitor.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -122,10 +123,55 @@ func _ready() -> void:
 	control_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 
 
-func toggle_vram_display() -> void:
-	print("yo")
-	vram_display_visible = not vram_display_visible
-	perf_bar.visible = vram_display_visible
+## Force-closes whatever menu/overlay is currently open, however deep it is. Wired to the button
+## that used to toggle the performance readout (see the "vram" button in ControllerLayout.gd) --
+## that readout is now automatic (see _check_hardware_gpu_safety()) instead of manually toggled.
+func close_any_open_menu() -> void:
+	menu_peek_hidden = false
+	if control_panel.active_state == control_panel.ControlState.HIDDEN:
+		return
+
+	# A reposition session in progress gets reverted rather than left half-applied.
+	if control_panel.options_menu and control_panel.options_menu.layout and control_panel.options_menu.layout.editing:
+		control_panel.options_menu.layout.edit_cancel()
+
+	# The readme has its own separate panel/open-state, same as the existing PWR-button close path.
+	if control_panel.options_menu and control_panel.options_menu.help and control_panel.options_menu.help.is_open:
+		control_panel.options_menu.help.close()
+
+	if select_pass_overlay_panel and is_instance_valid(select_pass_overlay_panel):
+		select_pass_overlay_panel.queue_free()
+		select_pass_overlay_panel = null
+	if menu_overlay_panel and is_instance_valid(menu_overlay_panel):
+		menu_overlay_panel.queue_free()
+		menu_overlay_panel = null
+		menu_list_box = null
+
+	menu_center_host.visible = false
+	menu_peek_hidden = false
+	_update_menu_host_visibility()
+	is_menu_open = false
+	active_menu_kind = MenuKind.NONE
+	control_panel.active_state = control_panel.ControlState.HIDDEN
+
+
+## Single source of truth for whether the menu panel is actually drawn: it must be both logically
+## open (some tier/menu state is active) AND not currently peek-hidden by the "hide menu" button.
+func _update_menu_host_visibility() -> void:
+	var logically_open: bool = control_panel.active_state != control_panel.ControlState.HIDDEN
+	menu_center_host.visible = logically_open and not menu_peek_hidden
+
+## Wired to the button that previously force-closed menus. Hides the menu panel WITHOUT touching
+## any menu state -- same tier, same cursor, same everything -- so pressing it again reveals
+## exactly what was there. Does nothing if no menu is open.
+
+func toggle_menu_hidden() -> void:
+	if control_panel.active_state == control_panel.ControlState.HIDDEN:
+		return
+	menu_peek_hidden = not menu_peek_hidden
+	_update_menu_host_visibility()
+	if control_panel.options_menu and control_panel.options_menu.layout:
+		control_panel.options_menu.layout.set_hide_button_icon(menu_peek_hidden)
 
 
 func setup_three_pass_pipeline() -> void:
@@ -246,8 +292,9 @@ func setup_interface_layer() -> void:
 	# THE IN-VIEWPORT TEXT MENU OVERLAY LAYER
 	menu_center_host = CenterContainer.new()
 	menu_center_host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	menu_center_host.mouse_filter = Control.MOUSE_FILTER_PASS
+	menu_center_host.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	menu_center_host.visible = false
+
 	menu_center_host.z_index = 2
 	viewport_host.add_child(menu_center_host)
 
@@ -260,11 +307,11 @@ func setup_interface_layer() -> void:
 
 	# 🌟 OPT Button on BOTTOM
 	btn_select_pass = Button.new()
-	btn_select_pass.text = "🎛\n"
+	btn_select_pass.text = "💠\n"
 	btn_select_pass.custom_minimum_size = Vector2(96, 96)
 	btn_select_pass.size_flags_vertical = Control.SIZE_SHRINK_END
-	btn_select_pass.add_theme_color_override("font_color", Color.CORNFLOWER_BLUE)
-	btn_select_pass.add_theme_font_size_override("font_size", 22)
+	#btn_select_pass.add_theme_color_override("font_color", Color.CORNFLOWER_BLUE)
+	btn_select_pass.add_theme_font_size_override("font_size", 24)
 	# 🌟 WIRE RE-CONNECTED: Link OPT button to its handler method
 	btn_select_pass.pressed.connect(_on_select_pass_button_pressed)
 	utility_trench.add_child(btn_select_pass)
@@ -278,7 +325,7 @@ func setup_interface_layer() -> void:
 	btn_shader_menu.custom_minimum_size = Vector2(96, 96)
 	btn_shader_menu.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	btn_shader_menu.add_theme_color_override("font_color", Color.GOLD)
-	btn_shader_menu.add_theme_font_size_override("font_size", 28)
+	btn_shader_menu.add_theme_font_size_override("font_size", 24)
 	# 🌟 WIRE RE-CONNECTED: Link PWR button to its handler method
 	btn_shader_menu.pressed.connect(_on_shader_menu_button_pressed)
 	utility_trench.add_child(btn_shader_menu)
@@ -316,6 +363,8 @@ func _on_select_pass_button_pressed() -> void:
 			menu_overlay_panel = null
 			
 		menu_center_host.visible = false
+		menu_peek_hidden = false
+		_update_menu_host_visibility()
 
 # FUNCTION END: _on_select_pass_button_pressed
 
@@ -325,6 +374,8 @@ func open_select_pass_menu() -> void:
 
 
 	menu_center_host.visible = true
+	menu_peek_hidden = false
+	_update_menu_host_visibility()
 	select_pass_overlay_panel = PanelContainer.new()
 	select_pass_overlay_panel.custom_minimum_size = Vector2(340, 220)
 	var style = StyleBoxFlat.new()
@@ -408,6 +459,7 @@ func close_select_pass_menu(confirm: bool) -> void:
 	#btn_select_pass.text = LABEL_SELECT_PASS_IDLE
 	menu_center_host.visible = false
 
+
 	if select_pass_overlay_panel and is_instance_valid(select_pass_overlay_panel):
 		select_pass_overlay_panel.queue_free()
 		select_pass_overlay_panel = null
@@ -425,6 +477,8 @@ func _on_shader_menu_button_pressed() -> void:
 			menu_overlay_panel.queue_free()
 			menu_overlay_panel = null
 		menu_center_host.visible = false
+		menu_peek_hidden = false
+		_update_menu_host_visibility()
 		# The readme has its own panel outside menu_overlay_panel, so hiding the shared one above does
 		# not close it on its own -- tell it explicitly so its own "am I open" state stays correct
 		if control_panel.options_menu and control_panel.options_menu.help and control_panel.options_menu.help.is_open:
@@ -433,7 +487,7 @@ func _on_shader_menu_button_pressed() -> void:
 
 	print("🟡 Tapped: Opening System Main Menu -> SYSTEM_MENU")
 	control_panel.active_state = control_panel.ControlState.SYSTEM_MENU
-	control_panel.system_menu_index = 0 # Default highlight cursor to row 0 (BACK)
+	control_panel.system_menu_index = 0 # Default highlight cursor to row 0 (APP Config options)
 
 	# Clean up any lingering art menus that might be sitting open underneath
 	if select_pass_overlay_panel and is_instance_valid(select_pass_overlay_panel):
@@ -452,6 +506,8 @@ func _on_shader_menu_button_pressed() -> void:
 
 	# Build a clean, high-contrast text-mode box for System operations
 	menu_center_host.visible = true
+	menu_peek_hidden = false
+	_update_menu_host_visibility()
 	menu_overlay_panel = PanelContainer.new()
 	menu_overlay_panel.custom_minimum_size = Vector2(340, 220)
 	var style = StyleBoxFlat.new()
@@ -478,7 +534,7 @@ func redraw_system_power_menu() -> void:
 	label_title.add_theme_color_override("font_color", Color.RED)
 	menu_list_box.add_child(label_title)
 
-	var options = [control_panel.dev_menu_label(), "⚙ APP CONFIG OPTIONS", "🗂 PRESETS", "▶ START SCREENSAVER", "❓ HELP", "⏻ EXIT APPLICATION"]
+	var options = ["⚙ APP CONFIG OPTIONS", "🗂 PRESETS", "▶ START SCREENSAVER", control_panel.dev_menu_label(), "❓ HELP", "⏻ EXIT APPLICATION"]
 	for i in range(options.size()):
 		var lbl = Label.new()
 		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -605,6 +661,8 @@ func _tier3_row0_label() -> String:
 ## Build (or recycle) the cyan overlay shell shared by Tiers 2 to 5.
 func _ensure_cyan_panel() -> void:
 	menu_center_host.visible = true
+	menu_peek_hidden = false
+	_update_menu_host_visibility()
 	if is_instance_valid(menu_overlay_panel) and is_instance_valid(menu_list_box):
 		for child in menu_list_box.get_children(): child.queue_free()
 		return
@@ -763,7 +821,7 @@ func redraw_fast_travel_menu() -> void:
 			var row_rec: Dictionary = uniforms_list[i - 1]
 			var row_text: String = String(row_rec["label"]).to_upper()
 			if row_rec["is_style"]:
-				row_text = "★ " + row_text # the style selector stands out from its own group's controls
+				row_text = "★ " + row_text + "★ "# the style selector stands out from its own group's controls
 			_add_menu_row(row_text, i == cursor)
 	if scrolling: _add_scroll_hint(stop < total_rows, "▼")
 
@@ -886,13 +944,11 @@ func _process(delta: float) -> void:
 	
 	
 func _check_hardware_gpu_safety() -> void:
-	# 1. Pull system resource usage metrics from the engine servers
 	var current_vram_mb = Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED) / 1024.0 / 1024.0
 	var current_fps = Engine.get_frames_per_second()
 
-	
-	# 2. Permanent Diagnostic Display Readout Sync (Top-Right)
-	# Update this specific section inside your _check_hardware_gpu_safety() function:
+	perf_bar.visible = control_panel != null and control_panel.active_state != control_panel.ControlState.HIDDEN and not menu_peek_hidden
+
 	if label_perf_monitor:
 		label_perf_monitor.text = " FPS: %d  |  VRAM: %.1f MB   " % [current_fps, current_vram_mb]
 		if current_fps > 55: label_perf_monitor.add_theme_color_override("font_color", Color.GREEN)
@@ -964,7 +1020,7 @@ func load_default_test_shaders() -> void:
 	#if DEBUG_DUMMY_RECIPES > 0:
 		#library.add_dummy_recipes(DEBUG_DUMMY_RECIPES)
 
-	pass_stack = [["that_intro"], ["chromatic_ripple"], []]
+	pass_stack = [["fbm_master"], [""], []]
 	for p in range(3):
 		rebuild_pass(p)
 

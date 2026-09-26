@@ -19,6 +19,15 @@ const BUTTON_STATES: Array = ["normal", "hover", "pressed", "hover_pressed"]
 
 enum Mode { LIST, CHANNEL, TWEAK, REPOSITION }
 
+const ANCHOR_DEFS: Dictionary = {
+	"shader_center": {"label": "SHADER POSITION", "channels": ["X", "Y"]},
+	"menu_center": {"label": "MENU POSITION", "channels": ["X", "Y"]},
+}
+
+func _def_for(key: String) -> Dictionary:
+	return COLOR_DEFS[key] if COLOR_DEFS.has(key) else ANCHOR_DEFS[key]
+
+
 const TREE: Dictionary = {
 	"root": {
 		"title": " ⚙ APP CONFIG OPTIONS ",
@@ -82,9 +91,9 @@ func setup(main_manager) -> void:
 	settings["bg_color"] = defaults["bg_color"]
 	settings["button_color"] = defaults["button_color"]
 	_load_settings()
-	_apply_all()
 	layout = load("res://ControllerLayout.gd").new()
-	layout.setup(main, self)
+	layout.setup(main, self) # builds every grid button, incl. the hide-menu one -- must run before _apply_all()
+	_apply_all()
 	lab = load("res://TransitionLab.gd").new()
 	main.add_child(lab) # a Node, so it can run every frame during a transition
 	lab.setup(main, self)
@@ -184,10 +193,15 @@ func _apply_buttons() -> void:
 		btn.set_meta("tatool_styled", true)
 
 func _get_channel(key: String, idx: int) -> float:
+	if ANCHOR_DEFS.has(key):
+		return layout.anchor_value(key, idx)
 	var c: Color = settings[key]
 	return c[idx]
 
 func _set_channel(key: String, idx: int, v: float) -> void:
+	if ANCHOR_DEFS.has(key):
+		layout.set_anchor_value(key, idx, v)
+		return
 	var c: Color = settings[key]
 	c[idx] = clampf(snappedf(v, 0.000001), 0.0, 1.0)
 	settings[key] = c
@@ -197,6 +211,13 @@ func _set_channel(key: String, idx: int, v: float) -> void:
 	else:
 		_apply_buttons()
 	_save_settings()
+
+func _default_channel(key: String, idx: int) -> float:
+	if ANCHOR_DEFS.has(key):
+		return layout.anchor_default(key, idx)
+	var default_color: Color = defaults[key]
+	return default_color[idx]
+
 
 func _reset_colors() -> void:
 	settings["bg_color"] = defaults["bg_color"]
@@ -282,7 +303,7 @@ func handle_vertical(step: int) -> void:
 			var total: int = _rows_for(node_id).size()
 			cursors[node_id] = posmod(int(cursors.get(node_id, 0)) + step, total)
 		Mode.CHANNEL:
-			channel_idx = posmod(channel_idx + step, COLOR_DEFS[active_key]["channels"].size())
+			channel_idx = posmod(channel_idx + step, _def_for(active_key)["channels"].size())
 		Mode.TWEAK:
 			tweak_row = posmod(tweak_row + step, 2)
 	redraw()
@@ -293,6 +314,18 @@ func handle_horizontal(step: int) -> void:
 		return
 	if lab != null and lab.menu_active():
 		lab.handle_horizontal(step)
+		return
+	
+
+	if mode == Mode.LIST and node_stack.back() == "layout":
+		var rows: Array = _rows_for("layout")
+		var row: Dictionary = rows[clampi(int(cursors.get("layout", 0)), 0, rows.size() - 1)]
+		if row["kind"] == "shader_size":
+			layout.cycle_shader_size(step)
+			redraw()
+		elif row["kind"] == "menu_size":
+			layout.cycle_menu_size(step)
+			redraw()
 		return
 	if mode != Mode.TWEAK:
 		return
@@ -325,8 +358,8 @@ func handle_a() -> void:
 				"reposition":
 					layout.begin_edit()
 					mode = Mode.REPOSITION
-				"flip_screen":
-					layout.toggle_flip_screen(orient)
+				"shader_size":
+					layout.cycle_shader_size(1)
 				"orient_mode":
 					layout.set_orient_mode((layout.orient_mode + 1) % 3)
 				"reset_layout":
@@ -336,14 +369,18 @@ func handle_a() -> void:
 					node_stack.append("icon_actions")
 					cursors["icon_actions"] = 0
 				"icon_flip":
-					layout.flip_icon(orient, ctx_button)
+					layout.flip_icon(ctx_button)
 				"icon_rotate":
-					layout.rotate_icon(orient, ctx_button)
+					layout.rotate_icon(ctx_button)
 				"menu_flip":
 					layout.flip_menu()
 				"menu_rotate":
 					layout.rotate_menu()
 				"color":
+					active_key = row["key"]
+					channel_idx = 0
+					mode = Mode.CHANNEL
+				"anchor":
 					active_key = row["key"]
 					channel_idx = 0
 					mode = Mode.CHANNEL
@@ -417,29 +454,31 @@ func _title_for(node_id: String) -> String:
 	return TREE[node_id]["title"]
 
 func _layout_rows() -> Array:
-	var orient: int = layout.current_orient()
 	return [
 		{"label": "ROTATE / FLIP BUTTON ICONS", "kind": "go", "target": "icons"},
 		{"label": "ROTATE / FLIP MENU  [%s]" % layout.menu_state_text(), "kind": "go", "target": "menu_orient"},
-		{"label": "FLIP SCREEN  [%s]" % ("ON" if layout.is_screen_flipped(orient) else "OFF"), "kind": "flip_screen"},
+		{"label": "SHADER SIZE  [%d%%]  ◄ ►" % int(round(layout.shader_size() * 100.0)), "kind": "shader_size"},
+		{"label": "MENU SIZE  [%d%%]  ◄ ►" % int(round(layout.menu_scale() * 100.0)), "kind": "menu_size"},
+		{"label": "MOVE SHADER", "kind": "anchor", "key": "shader_center"},
+		{"label": "MOVE MENU", "kind": "anchor", "key": "menu_center"},
 		{"label": "REPOSITION BUTTONS", "kind": "reposition"},
 		{"label": "SCREEN ORIENTATION  [%s]" % layout.ORIENT_MODE_NAMES[layout.orient_mode], "kind": "orient_mode"},
 		{"label": "[ RESET LAYOUT TO DEFAULT ]", "kind": "reset_layout"},
 	]
 
+## Icon settings are shared across both orientations now, so this list needs no orient argument --
+## rotating a button's icon here fixes it in landscape and portrait at once.
 func _icon_list_rows() -> Array:
-	var orient: int = layout.current_orient()
 	var rows: Array = []
 	for id in layout.ALL_IDS:
-		rows.append({"label": "%s  [%s]" % [layout.button_name(id), layout.icon_state_text(orient, id)],
+		rows.append({"label": "%s  [%s]" % [layout.button_name(id), layout.icon_state_text(id)],
 				"kind": "icon_go", "button": id})
 	return rows
 
 func _icon_action_rows() -> Array:
-	var orient: int = layout.current_orient()
 	return [
-		{"label": "FLIP ICON  [%s]" % ("ON" if layout.icon_flipped(orient, ctx_button) else "OFF"), "kind": "icon_flip"},
-		{"label": "ROTATE ICON 90°  [%d°]" % layout.icon_rotation(orient, ctx_button), "kind": "icon_rotate"},
+		{"label": "FLIP ICON  [%s]" % ("ON" if layout.icon_flipped(ctx_button) else "OFF"), "kind": "icon_flip"},
+		{"label": "ROTATE ICON 90°  [%d°]" % layout.icon_rotation(ctx_button), "kind": "icon_rotate"},
 	]
 
 func _menu_orient_rows() -> Array:
@@ -503,29 +542,33 @@ func _draw_list() -> void:
 
 func _draw_reposition() -> void:
 	_add_label(" ✥ REPOSITION BUTTONS ", Color.CYAN)
-	_add_label(" PRESS AND HOLD TO DRAG ", Color.WHITE)
+	_add_label(" PRESS AND HOLD A BUTTON TO DRAG ", Color.WHITE)
+	_add_label(" DRAG ⊕ (SHADER) OR ◇ (MENU) FREELY ", Color.WHITE)
 	_add_label(" TAP A TO ACCEPT LAYOUT ", Color.LIME_GREEN)
 	_add_label(" TAP B TO CANCEL CHANGES ", Color.TOMATO)
+	_add_label(" PRESS AND HOLD EMPTY SPACE TO SLIDE GRID ", Color.WHITE)
 
 func _draw_channels() -> void:
-	var def: Dictionary = COLOR_DEFS[active_key]
-	_add_label(" ◈ %s COLOR ◈ SELECT PARAMETER " % def["label"], Color.MAGENTA)
-	_add_swatch(_opaque_if_background(active_key))
+	var def: Dictionary = _def_for(active_key)
+	var suffix: String = " COLOR" if COLOR_DEFS.has(active_key) else ""
+	_add_label(" ◈ %s%s ◈ SELECT PARAMETER " % [def["label"], suffix], Color.MAGENTA)
+	if COLOR_DEFS.has(active_key):
+		_add_swatch(_opaque_if_background(active_key))
 	var names: Array = def["channels"]
 	for i in range(names.size()):
 		var value_text: String = main._fmt(_get_channel(active_key, i))
 		main._add_menu_row("%s   [ %s ]" % [names[i], value_text], i == channel_idx)
 
 func _draw_tweak() -> void:
-	var def: Dictionary = COLOR_DEFS[active_key]
+	var def: Dictionary = _def_for(active_key)
 	var names: Array = def["channels"]
 	var value: float = _get_channel(active_key, channel_idx)
-	var default_color: Color = defaults[active_key]
-	var default_value: float = default_color[channel_idx]
+	var default_value: float = _default_channel(active_key, channel_idx)
 	var sens_now: float = SENS_LADDER[sens_idx]
 
-	_add_label(" +═ COLOR TWEAK CONSOLE ═+ ", Color.ORANGE)
-	_add_swatch(_opaque_if_background(active_key))
+	_add_label(" +═ TWEAK CONSOLE ═+ ", Color.ORANGE)
+	if COLOR_DEFS.has(active_key):
+		_add_swatch(_opaque_if_background(active_key))
 	_add_label(" ║ NAME: %s  ·  %s " % [def["label"], names[channel_idx]], Color.WHITE)
 
 	if tweak_row == 0:
@@ -545,3 +588,4 @@ func _opaque_if_background(key: String) -> Color:
 	if key == "bg_color":
 		return Color(c.r, c.g, c.b, 1.0)
 	return c
+	

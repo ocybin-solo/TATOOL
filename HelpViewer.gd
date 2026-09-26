@@ -1,9 +1,12 @@
 extends Node
 ## HelpViewer.gd -- "❓ HELP" (System Main Menu)
 ##
-## Reads res://README.md as plain text at runtime and shows it in a scrollable panel: D-pad up/down
-## scroll, ❌) returns to normal. Because the text is read from disk each time it opens rather than
-## baked into a script, editing README.md and re-exporting is all it takes to change what Help shows.
+## Reads res://README.md as plain text at runtime and shows it in a scrollable, ALWAYS FULL-SCREEN
+## panel: D-pad up/down scroll, ❌ or the on-screen ✕ CLOSE button return to normal. Deliberately its
+## own CanvasLayer rather than a child of menu_center_host -- Menu Center/Menu Size are user-movable
+## and user-scalable, and Help has to stay fully reachable no matter where those end up.
+## Because the text is read from disk each time it opens rather than baked into a script, editing
+## README.md and re-exporting is all it takes to change what Help shows.
 
 const README_PATH: String = "res://README.md"
 const SCROLL_STEP: float = 60.0
@@ -22,20 +25,29 @@ func setup(main_manager, owner_options: Object) -> void:
 	_build_panel()
 
 func _build_panel() -> void:
+	# A dedicated top-layer, above every other menu/overlay in the app, so Help is always genuinely
+	# on top and full-screen regardless of anything else happening underneath.
+	var overlay_layer := CanvasLayer.new()
+	overlay_layer.layer = 10
+	main.add_child(overlay_layer)
+
 	_panel = PanelContainer.new()
+	_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT) # always the whole window
 	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.02, 0.02, 0.04, 0.96)
-	style.set_border_width_all(2)
-	style.border_color = Color(1.0, 0.6, 0.0, 0.9) # matches the 🟠 main menu button
-	style.set_corner_radius_all(8)
-	style.set_content_margin_all(16)
+	style.bg_color = Color(0.02, 0.02, 0.04, 0.98)
 	_panel.add_theme_stylebox_override("panel", style)
-	_panel.custom_minimum_size = Vector2(560, 460)
 	_panel.visible = false
-	main.menu_center_host.add_child(_panel)
+	overlay_layer.add_child(_panel)
+
+	var margin := MarginContainer.new()
+	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	for side in ["left", "right", "top", "bottom"]:
+		margin.add_theme_constant_override("margin_%s" % side, 24)
+	_panel.add_child(margin)
 
 	var box := VBoxContainer.new()
-	_panel.add_child(box)
+	box.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	margin.add_child(box)
 
 	var title := Label.new()
 	title.text = " ❓ README "
@@ -46,15 +58,22 @@ func _build_panel() -> void:
 	_rtl = RichTextLabel.new()
 	_rtl.bbcode_enabled = false # plain text: the README's own formatting isn't reinterpreted as markup
 	_rtl.scroll_active = true
-	_rtl.custom_minimum_size = Vector2(520, 380)
+	_rtl.size_flags_vertical = Control.SIZE_EXPAND_FILL # fills whatever room is left, any screen size
 	_rtl.add_theme_color_override("default_color", Color.WHITE)
 	box.add_child(_rtl)
 
 	var hint := Label.new()
-	hint.text = " ▲▼ SCROLL    ❌ BACK "
+	hint.text = " ▲▼ SCROLL    ❌ OR TAP CLOSE BELOW "
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint.add_theme_color_override("font_color", Color.DIM_GRAY)
 	box.add_child(hint)
+
+	var close_btn := Button.new()
+	close_btn.text = "✕ CLOSE"
+	close_btn.custom_minimum_size = Vector2(0, 64)
+	close_btn.add_theme_font_size_override("font_size", 28)
+	close_btn.pressed.connect(close_and_return)
+	box.add_child(close_btn)
 
 func _read_readme() -> String:
 	if not FileAccess.file_exists(README_PATH):
@@ -68,15 +87,19 @@ func open() -> void:
 	is_open = true
 	_rtl.text = _read_readme()
 	_rtl.scroll_to_line(0)
-	main.menu_center_host.visible = true
 	_panel.visible = true
 
+## Hides the panel only. Used where the caller (DynamicUI, MainManager's close-everything paths)
+## still needs to update active_state itself -- see close_and_return() for the common case.
 func close() -> void:
 	is_open = false
 	_panel.visible = false
-	var cp = main.control_panel
-	if cp.active_state == cp.ControlState.HIDDEN:
-		main.menu_center_host.visible = false
+
+## The one true "Help is done" action -- called by both the physical ❌ button (via DynamicUI's
+## B-handler) and the on-screen ✕ CLOSE button, so the two can never disagree about app state.
+func close_and_return() -> void:
+	close()
+	main.control_panel.active_state = main.control_panel.ControlState.HIDDEN
 
 func scroll(step: int) -> void:
 	if not is_open:

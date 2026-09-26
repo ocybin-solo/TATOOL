@@ -77,6 +77,7 @@ This project was developed with the assistance of the following AI tools (free v
 	
 * Gemini AI - Assisted primarily with web research, documentation, and conceptual guidance.
 * Claude AI - Assisted primarily with code debugging and refactoring major architectural changes.
+* ChatGPT AI - Assisted with developing the shaders
 
 While AI tools were used for research and code generation, all architectural decisions, final integrations, testing and review were performed by the primary author.
 

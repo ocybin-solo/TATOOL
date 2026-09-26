@@ -24,7 +24,7 @@ var last_tier4_index: int = 0  # Remembers focused Parameter/Channel Sub-Axis Ro
 var last_tier5_row: int = 0    # 0 = VALUE Row, 1 = SENSITIVITY Row
 
 # System Power Menu cursor memory tracker
-var system_menu_index: int = 0 # 0 = BACK, 1 = APP OPTIONS, 2 = PRESETS, 3 = EXIT GAME
+var system_menu_index: int = 0 # 0=APP CONFIG OPTIONS, 1=PRESETS, 2=START SCREENSAVER, 3=SCREENSAVER DEV, 4=HELP, 5=EXIT
 var options_menu # OptionsMenu.gd instance (System Menu > APP CONFIG OPTIONS), created right after boot
 
 # FUNCTION END: state_declarations
@@ -153,7 +153,7 @@ func setup_ui_layout() -> void:
 	btn_channel = Button.new()
 	btn_channel.text = "✔️"
 	btn_channel.custom_minimum_size = Vector2(96, 96)
-	btn_channel.add_theme_font_size_override("font_size", 24)
+	btn_channel.add_theme_font_size_override("font_size", 20)
 	btn_channel.add_theme_color_override("font_color", Color.GREEN)
 	btn_channel.pressed.connect(_on_action_button_a) # Wired to Accept logic
 	action_row.add_child(btn_channel)
@@ -167,7 +167,7 @@ func setup_ui_layout() -> void:
 	btn_sens_left = Button.new()
 	btn_sens_left.text = "❌"
 	btn_sens_left.custom_minimum_size = Vector2(96, 96)
-	btn_sens_left.add_theme_font_size_override("font_size", 24)
+	btn_sens_left.add_theme_font_size_override("font_size", 20)
 	btn_sens_left.add_theme_color_override("font_color", Color.RED)
 	btn_sens_left.pressed.connect(_on_action_button_b) # Wired to Exit/Back logic
 	action_row.add_child(btn_sens_left)
@@ -333,11 +333,12 @@ func _on_action_button_b() -> void:
 				main_manager.menu_overlay_panel.queue_free()
 				main_manager.menu_overlay_panel = null
 			main_manager.menu_center_host.visible = false
+			main_manager.menu_peek_hidden = false
+			main_manager._update_menu_host_visibility()
 
 		ControlState.HELP_VIEW:
 			if options_menu and options_menu.help:
-				options_menu.help.close()
-			active_state = ControlState.HIDDEN
+				options_menu.help.close_and_return()
 
 		ControlState.TIER_5_TWEAK:
 			# Single-parameter uniforms skipped Tier 4 on the way in, so skip it on the way out too
@@ -378,6 +379,8 @@ func _on_action_button_b() -> void:
 				main_manager.select_pass_overlay_panel.queue_free()
 				main_manager.select_pass_overlay_panel = null
 			main_manager.menu_center_host.visible = false
+			main_manager.menu_peek_hidden = false
+			main_manager._update_menu_host_visibility()
 
 		ControlState.HIDDEN:
 			return
@@ -409,17 +412,12 @@ func _on_action_button_a() -> void:
 				return
 			match system_menu_index:
 				0:
-					# SCREENSAVER DEV: switch the mode on / off; the menu stays open until B is pressed
-					if options_menu:
-						options_menu.toggle_dev_mode()
-						main_manager.redraw_system_power_menu()
-				1:
 					if options_menu:
 						options_menu.open()
-				2:
+				1:
 					if options_menu:
 						options_menu.open_presets()
-				3:
+				2:
 					# START SCREENSAVER: runs with no menu on screen; any tap anywhere stops it
 					if options_menu:
 						var problem: String = options_menu.start_screensaver()
@@ -428,14 +426,21 @@ func _on_action_button_a() -> void:
 							if main_manager.menu_overlay_panel and is_instance_valid(main_manager.menu_overlay_panel):
 								main_manager.menu_overlay_panel.queue_free()
 								main_manager.menu_overlay_panel = null
-							main_manager.menu_center_host.visible = false
+							main_manager.menu_peek_hidden = false
+							main_manager._update_menu_host_visibility()
 						else:
 							options_menu.flash_menu_message(problem)
+				3:
+					# SCREENSAVER DEV: switch the mode on / off; the menu stays open until B is pressed
+					if options_menu:
+						options_menu.toggle_dev_mode()
+						main_manager.redraw_system_power_menu()
 				4:
 					# HELP: shows README.md; the main menu closes, and ✔️ returns to normal
 					if options_menu and options_menu.help:
 						options_menu.help.open()
 						active_state = ControlState.HELP_VIEW
+						main_manager.menu_peek_hidden = false
 						if main_manager.menu_overlay_panel and is_instance_valid(main_manager.menu_overlay_panel):
 							main_manager.menu_overlay_panel.queue_free()
 							main_manager.menu_overlay_panel = null

@@ -13,14 +13,20 @@ extends RefCounted
 ## Controls (routed here by OptionsMenu while is_active()):
 ##   Presets:   D-pad up/down = move, A = select, B = back
 ##   Load list: A = load, D-pad left/right = delete (asks first), B = back
-##   Save:      A or the keyboard's Done key = save, tap the name to type one, B = cancel
+##   Save:      first pick a hold time (D-pad left/right, A to continue), then A or the keyboard's
+##              Done key saves, tap the name to type one, B cancels a step
+##
+## Each preset stores its own hold time, in seconds -- how long Screensaver Mode should stay on it
+## before starting the next transition. A preset saved before this existed has no stored hold time;
+## ScreensaverMode falls back to the global default (TransitionLab.hold_seconds) for those.
 
 const PRESET_DIR: String = "user://presets"
 const FORMAT_VERSION: int = 1
 const NAME_MAX_LENGTH: int = 24
-const ROOT_ROWS: Array = ["LOAD PRESET", "SAVE PRESET", "BACK"]
+const ROOT_ROWS: Array = ["SAVE PRESET", "LOAD PRESET"]
+const HOLD_TIME_CHOICES: Array = [3.0, 4.0, 6.0, 8.0, 10.0, 15.0, 20.0, 30.0]
 
-enum Mode { ROOT, LOAD_LIST, CONFIRM_DELETE, NAME_ENTRY }
+enum Mode { ROOT, LOAD_LIST, CONFIRM_DELETE, DURATION_SELECT, NAME_ENTRY }
 
 var main         # MainManager
 var owner_menu   # OptionsMenu (told when typing ends so it can re-check the layout)
@@ -30,10 +36,11 @@ var typing: bool = false # true while the name field has focus (the on-screen ke
 var mode: int = Mode.ROOT
 var root_cursor: int = 0
 var list_cursor: int = 0
-var entries: Array = []  # [{file, name, created}], newest first
+var entries: Array = []  # [{file, name, created, duration_sec}], newest first
 var status: String = ""
 var _panel_ref: Object = null
 var _name_edit = null
+var _save_duration: float = 6.0 # remembers your last choice across saves this session
 
 
 func setup(main_manager, owner_options: Object) -> void:
@@ -88,23 +95,29 @@ func handle_vertical(step: int) -> void:
 	status = ""
 	redraw()
 
-## In the load list, left/right asks to delete the highlighted preset.
-func handle_horizontal(_step: int) -> void:
+## In the load list, left/right asks to delete the highlighted preset. On the hold-time step,
+## left/right instead steps through HOLD_TIME_CHOICES.
+func handle_horizontal(step: int) -> void:
 	if mode == Mode.LOAD_LIST and not entries.is_empty():
 		mode = Mode.CONFIRM_DELETE
+		redraw()
+	elif mode == Mode.DURATION_SELECT:
+		var idx: int = HOLD_TIME_CHOICES.find(_save_duration)
+		if idx == -1:
+			idx = HOLD_TIME_CHOICES.find(6.0)
+		idx = posmod(idx + step, HOLD_TIME_CHOICES.size())
+		_save_duration = HOLD_TIME_CHOICES[idx]
 		redraw()
 
 func handle_a() -> void:
 	match mode:
+
 		Mode.ROOT:
 			match root_cursor:
 				0:
-					_open_load_list()
+					_open_duration_select()
 				1:
-					_open_name_entry()
-				2:
-					_leave()
-					main.redraw_system_power_menu()
+					_open_load_list()
 		Mode.LOAD_LIST:
 			if entries.is_empty():
 				return
@@ -123,6 +136,8 @@ func handle_a() -> void:
 			status = "DELETED"
 			mode = Mode.LOAD_LIST
 			redraw()
+		Mode.DURATION_SELECT:
+			_open_name_entry()
 		Mode.NAME_ENTRY:
 			_save_current(_name_edit.text if is_instance_valid(_name_edit) else "")
 
@@ -132,6 +147,8 @@ func handle_b() -> bool:
 	match mode:
 		Mode.NAME_ENTRY:
 			_end_typing()
+			mode = Mode.DURATION_SELECT
+		Mode.DURATION_SELECT:
 			mode = Mode.ROOT
 		Mode.CONFIRM_DELETE:
 			mode = Mode.LOAD_LIST
@@ -148,6 +165,11 @@ func handle_b() -> bool:
 # =========================================================================
 # SAVING
 # =========================================================================
+func _open_duration_select() -> void:
+	mode = Mode.DURATION_SELECT
+	status = ""
+	redraw()
+
 func _open_name_entry() -> void:
 	mode = Mode.NAME_ENTRY
 	status = ""
@@ -199,6 +221,7 @@ func _save_current(raw_name: String) -> void:
 	cfg.set_value("preset", "version", FORMAT_VERSION)
 	cfg.set_value("preset", "name", preset_name)
 	cfg.set_value("preset", "created", Time.get_datetime_string_from_system())
+	cfg.set_value("preset", "duration_sec", _save_duration)
 	for p in range(3):
 		var section: String = "pass_%d" % p
 		cfg.set_value(section, "stack", main.pass_stack[p].duplicate())
@@ -241,6 +264,7 @@ func _scan() -> Array:
 			"file": path,
 			"name": str(cfg.get_value("preset", "name", f.get_basename())),
 			"created": str(cfg.get_value("preset", "created", "")),
+			"duration_sec": float(cfg.get_value("preset", "duration_sec", -1.0)), # -1 = not set (older preset)
 		})
 	out.sort_custom(func(a, b): return a["created"] > b["created"])
 	return out
@@ -350,6 +374,8 @@ func redraw() -> void:
 			_draw_load_list()
 		Mode.CONFIRM_DELETE:
 			_draw_confirm_delete()
+		Mode.DURATION_SELECT:
+			_draw_duration_select()
 		Mode.NAME_ENTRY:
 			_draw_name_entry()
 
@@ -388,16 +414,23 @@ func _draw_load_list() -> void:
 	for i in range(start, stop):
 		main._add_menu_row(String(entries[i]["name"]), i == list_cursor)
 	if scrolling: main._add_scroll_hint(stop < entries.size(), "▼")
-	_add_label(" ✔️= LOAD    ◄ ► DELETE ", Color.DIM_GRAY)
+	_add_label(" A LOAD    ◄ ► DELETE ", Color.DIM_GRAY)
 	_add_status()
 
 func _draw_confirm_delete() -> void:
 	_add_label(" DELETE THIS PRESET? ", Color.ORANGE)
 	_add_label(String(entries[list_cursor]["name"]), Color.WHITE)
-	_add_label(" ✔️ = YES, DELETE    ❌ = NO ", Color.YELLOW)
+	_add_label(" A = YES, DELETE    B = NO ", Color.YELLOW)
+
+func _draw_duration_select() -> void:
+	_add_label(" ⏱ HOLD TIME FOR THIS PRESET ", Color.CHARTREUSE)
+	_add_label(" HOW LONG SCREENSAVER MODE STAYS ON IT ", Color.DIM_GRAY)
+	_add_label(" ◄ [ %d S ] ► " % int(_save_duration), Color.YELLOW)
+	_add_label(" A CONTINUE    B CANCEL ", Color.DIM_GRAY)
 
 func _draw_name_entry() -> void:
 	_add_label(" 💾 SAVE PRESET ", Color.CHARTREUSE)
+	_add_label(" HOLD TIME: %d S " % int(_save_duration), Color.DIM_GRAY)
 	_add_label(" NAME (TAP THE NAME TO CHANGE IT) ", Color.DIM_GRAY)
 
 	_name_edit = LineEdit.new()
@@ -411,8 +444,8 @@ func _draw_name_entry() -> void:
 	_name_edit.focus_exited.connect(_on_typing_stopped)
 	main.menu_list_box.add_child(_name_edit)
 
-	_add_label(" ✔️ OR KEYBOARD DONE = SAVE ", Color.YELLOW)
-	_add_label(" ❌ = CANCEL ", Color.DARK_GRAY)
+	_add_label(" A OR KEYBOARD DONE = SAVE ", Color.YELLOW)
+	_add_label(" B = CANCEL ", Color.DARK_GRAY)
 
 ## A short message that outlives the menu (used after loading a preset).
 func _toast(text: String) -> void:

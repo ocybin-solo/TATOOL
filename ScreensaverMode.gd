@@ -1,9 +1,10 @@
 extends Node
 ## ScreensaverMode.gd -- "Screensaver Mode" (System Main Menu > START SCREENSAVER)
 ##
-## Runs on its own with no input: it picks a random saved animation preset, holds on it (for however
-## long TransitionLab.hold_seconds is set to -- adjustable in the Screensaver Dev OPT menu), then picks a
-## random saved TRANSITION preset (from TransitionLab / "Screensaver Dev") and uses it to transition to
+## Runs on its own with no input: it picks a random saved animation preset, holds on it -- for however
+## long THAT PRESET's own hold time says (set when it was saved), or TransitionLab.hold_seconds if it
+## predates that option -- then picks a random saved TRANSITION preset (from TransitionLab / "Screensaver
+## Dev") and uses it to transition to
 ## another random animation preset, repeating forever. A tap anywhere on screen stops it and restores
 ## whatever was on screen before it started.
 ##
@@ -19,6 +20,7 @@ var _stop_button: Button
 var _snapshot_stack: Array = []
 var _snapshot_values: Array = []
 var _current_file: String = ""
+var _current_hold: float = 6.0 # the on-screen preset's own hold time (falls back to lab.hold_seconds)
 var _hold_timer: SceneTreeTimer = null
 
 
@@ -103,7 +105,7 @@ func stop() -> void:
 func _on_transition_finished() -> void:
 	if not running:
 		return
-	_hold_timer = main.get_tree().create_timer(owner_menu.lab.hold_seconds)
+	_hold_timer = main.get_tree().create_timer(_current_hold)
 	_hold_timer.timeout.connect(_advance)
 
 ## Picks a random next preset (never the one on screen now) and a random transition to reach it.
@@ -118,6 +120,9 @@ func _advance() -> void:
 	if pool.is_empty():
 		pool = entries
 	var target: Dictionary = pool[randi() % pool.size()]
+	# -1 means the preset predates the per-preset hold-time feature: fall back to the dev-mode default
+	var target_hold: float = float(target.get("duration_sec", -1.0))
+	_current_hold = target_hold if target_hold > 0.0 else owner_menu.lab.hold_seconds
 
 	var transitions: Array = owner_menu.lab._scan_transition_presets()
 	if transitions.is_empty():
